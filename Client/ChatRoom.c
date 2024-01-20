@@ -66,34 +66,16 @@ static int SendJsonToServer(int fd, const char *json)
 /* 接收json */
 static int RecvJsonFromServer(int fd,  char *json)
 {
-    int ret = 0;            // 返回值
-    int len = 0;            // 当前json长度
-    int recvLen = 0;        // 已接收的长度
-    while (recvLen < CONTENT_SIZE)
+
+    printf("开始接收json\n");
+    int ret = recv(fd, json, CONTENT_SIZE, 0);
+    if (ret < 0)
     {
-        ret = recv(fd, json + recvLen, CONTENT_SIZE - recvLen, 0);  //  从recvLen位置读取CONTENT_SIZE - recvLen长的数据
-        if (ret == -1)
-        {
-            perror("recv error");
-            return JSON_ERROR;
-        }
-        if (ret == 0)   // 读取结束
-        {
-            break;
-        }
-        recvLen += ret; // 已接收长度加上新读取的长度ret
-        len = strlen(json); // 更新当前长度
-        if (recvLen >= CONTENT_SIZE)
-        {
-            printf("接收的json过长\n");
-            return OVERFLOW;
-        }
-        if (len >= CONTENT_SIZE)
-        {
-            printf("接收的json过长\n");
-            return OVERFLOW;
-        }
+        perror("recv error");
+        return ret;
     }
+    printf("json:%s\n",json);
+    printf("接收json成功\n");
     return SUCCESS;
 }
 
@@ -114,8 +96,15 @@ static int JoinPath(char *path, const char *dir, const char *filename)
 /* 登录成功的主界面 */
 static int ChatRoomMain(int fd, json_object *json)
 {
+    
     /* 用户名 */
-    const char *username = json_object_get_string(json_object_object_get(json, "name"));
+    json_object *usernameJson = json_object_object_get(json, "name");
+    if(usernameJson == NULL)
+    {
+        printf("json_object_object_get error\n");
+        return JSON_ERROR;
+    }
+    const char *username = json_object_get_string(usernameJson);
     
     /* 创建用户本地数据目录 */
     char path[PATH_SIZE] = {0};
@@ -202,7 +191,8 @@ int ChatRoomInit()
                 break;
             default:
                 ChatRoomExit();
-                break;
+                close(fd);
+                return SUCCESS;
         }
     }
 
@@ -258,7 +248,7 @@ int ChatRoomRegister(int sockfd)
     char retJson[CONTENT_SIZE] = {0};
     RecvJsonFromServer(sockfd, retJson);
 
-    json_object *jreceipt = json_object_object_get(json_tokener_parse(retJson), "receipt");
+    json_object *jreceipt = json_tokener_parse(retJson);
     if (jreceipt == NULL)
     {
         printf("注册失败\n");
@@ -267,7 +257,7 @@ int ChatRoomRegister(int sockfd)
         return JSON_ERROR;
     }
 
-    const char *receipt = json_object_get_string(jreceipt);
+    const char *receipt = json_object_get_string(json_object_object_get(jreceipt,"receipt"));
     if (strcmp(receipt, "success") == 0)
     {
         printf("注册成功\n");

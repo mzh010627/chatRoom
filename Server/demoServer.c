@@ -43,6 +43,14 @@ enum STATUS_CODE
 
 };
 
+/* 接收请求并分类 */
+static int handleRequest(int client_fd);
+/* 用户注册 */
+static int userRegister(int client_fd, json_object *json);
+/* 用户登录 */
+static int userLogin(int client_fd);
+
+
 int main(int argc, char *argv[])
 {
     /* 初始化服务 */ 
@@ -72,7 +80,10 @@ int main(int argc, char *argv[])
     /* 启动服务 */
     while (1)
     {
+        /* 创建套接字 */
         struct sockaddr_in client_addr;
+        memset(&client_addr, 0, sizeof(client_addr));
+        /* 接收请求 */
         socklen_t client_addr_len = sizeof(client_addr);
         int client_fd = accept(server_fd, (struct sockaddr *)&client_addr, &client_addr_len);
         if (client_fd < 0)
@@ -81,32 +92,105 @@ int main(int argc, char *argv[])
             continue;
         }
         printf("client connect success\n");
-        /* 处理客户端请求 */
-        char buffer[1024];
-        while (1)
+
+        /* 处理请求 */
+        handleRequest(client_fd);
+        break;
+    }
+    close(server_fd);
+    return 0;
+}
+
+/* 处理请求 */
+static int handleRequest(int client_fd)
+{
+    char recvJson[CONTENT_SIZE] = {0};
+    while(1)
+    {
+        int ret = recv(client_fd, recvJson, CONTENT_SIZE, 0);
+        if (ret == -1)
         {
-            int ret = recv(client_fd, buffer, sizeof(buffer), 0);
-            if (ret < 0)
-            {
-                perror("recv error");
-                break;
-            }
-            else if (ret == 0)
-            {
-                printf("client disconnect\n");
-                /* 客户端断开连接 */
-                close(client_fd);
-                break;
-            }
-            else
-            {
-                printf("receive message: %s\n", buffer);
-                /* 处理客户端请求 */
-                /* ... */
-                /* 发送响应 */
-            }
+            perror("recv error");
+            return RECV_ERROR;
         }
+        if(ret == 0)
+        {
+            printf("client disconnect\n");
+            close(client_fd);
+            return SUCCESS;
+        }
+        printf("recv json: %s\n", recvJson);
+        /* 解析json */
+        json_object *jobj = json_tokener_parse(recvJson);
+        if (jobj == NULL)
+        {
+            printf("json parse error\n");
+            return JSON_ERROR;
+        }
+        /* 获取json中的type */
+        json_object *type = json_object_object_get(jobj, "type");
+        if (type == NULL)
+        {
+            printf("json type error\n");
+            return JSON_ERROR;
+        }
+        /* 获取json中的内容 */
+        const char *typeStr = json_object_get_string(type);
+        if (typeStr == NULL)
+        {
+            printf("json type error\n");
+            return JSON_ERROR;
+        }
+        if(strcmp(typeStr, "register") == 0)
+        {
+            /* 注册 */
+            /* 消除没用的请求类型*/
+            json_object_object_del(jobj, "type");
+            userRegister(client_fd,jobj);
+        }
+        else if(strcmp(typeStr, "login") == 0)
+        {
+            /* 登录 */
+            userLogin(client_fd);
+        }
+        else
+        {
+            /* 其他 */
+            printf("json type error\n");
+            return JSON_ERROR;
+        }
+
+
     }
 
+}
+
+/* 注册 */
+int userRegister(int client_fd, json_object *json)
+{
+    printf("注册\n");
+    const char *name = json_object_get_string(json_object_object_get(json, "name"));
+    const char *password = json_object_get_string(json_object_object_get(json, "password"));
+    printf("name: %s\n", name);
+    printf("password: %s\n", password);
+    /* 释放json */
+    json_object_put(json);
+    /* 返回json */
+    json = json_object_new_object();
+    json_object_object_add(json, "receipt", json_object_new_string("success"));
+    const char *sendJson = json_object_to_json_string(json);
+    printf("send json: %s\n", sendJson);
+    /* 发送json */
+    int ret = send(client_fd, sendJson, strlen(sendJson), 0);
+    if (ret == -1)
+    {
+        perror("send error");
+        return SEND_ERROR;
+    }
+    return SUCCESS;
+}
+
+int userLogin(int client_fd)
+{
     return 0;
 }
