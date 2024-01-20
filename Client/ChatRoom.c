@@ -34,7 +34,7 @@ enum STATUS_CODE
 };
 
 #define SERVER_PORT 8888        // 服务器端口号,暂定为8888
-#define SERVER_IP "127.0.0.1"   // 服务器ip,暂定为本机ip
+#define SERVER_IP "172.16.157.11"   // 服务器ip,暂定为本机ip
 #define NAME_SIZE 10            // 用户名长度
 #define PASSWORD_SIZE 20        // 密码长度
 #define MAX_FRIEND_NUM 10       // 最大好友数量
@@ -64,7 +64,7 @@ static int SendJsonToServer(int fd, const char *json)
     return SUCCESS;
 }
 /* 接收json */
-static int RecvJsonFromServer(int fd, char *json)
+static int RecvJsonFromServer(int fd,  char *json)
 {
     int ret = 0;            // 返回值
     int len = 0;            // 当前json长度
@@ -97,6 +97,20 @@ static int RecvJsonFromServer(int fd, char *json)
     return SUCCESS;
 }
 
+/* 拼接路径 */
+static int JoinPath(char *path, const char *dir, const char *filename)
+{
+    int ret = 0;
+    if (path == NULL || dir == NULL || filename == NULL)
+    {
+        return NULL_PTR;
+    }
+    strcpy(path, dir);
+    strcat(path, "/");
+    strcat(path, filename);
+    return SUCCESS;
+}
+
 /* 登录成功的主界面 */
 static int ChatRoomMain(int fd, json_object *json)
 {
@@ -104,11 +118,15 @@ static int ChatRoomMain(int fd, json_object *json)
     const char *username = json_object_get_string(json_object_object_get(json, "name"));
     
     /* 创建用户本地数据目录 */
-    char path[strlen("./usersData") + NAME_SIZE + 1] = "./usersData";
-    sprintf(path, "%s/%s", path, username);     // 拼接路径
+    char path[PATH_SIZE] = {0};
+    JoinPath(path, "./usersData", username);
     if(access(path, F_OK) == -1)
     {
-        mkdir(path, 0777);
+        if (mkdir(path, 0777) == -1)
+        {
+            perror("mkdir error");
+            return MALLOC_ERROR;
+        }
     }
     /* 好友列表 */
     json_object * friends = json_object_object_get(json, "friends");
@@ -121,7 +139,7 @@ static int ChatRoomMain(int fd, json_object *json)
     switch (ch)
     {
         case 'a':
-            ChatRoomShowFriends(fd, friends,username);
+            ChatRoomShowFriends(fd, friends,username, path);
             break;
         case 'b':
             ChatRoomShowGroupChat(fd, groups,username);
@@ -143,7 +161,11 @@ int ChatRoomInit()
     /* 创建用户本地数据目录 */
     if(access("./usersData", F_OK) == -1)
     {
-        mkdir("./usersData", 0777);
+        if (mkdir("./usersData", 0777) == -1)
+        {
+            perror("mkdir error");
+            return MALLOC_ERROR;
+        }
     }
     /* 初始化与服务器的连接 */
     int fd = socket(AF_INET, SOCK_STREAM, 0);
@@ -167,7 +189,7 @@ int ChatRoomInit()
     printf("欢迎使用网络聊天室\n");
     while(1)
     {
-        printf("请输入要进行的功能:\na.登录\nb.注册\n其他.退出聊天室");
+        printf("请输入要进行的功能:\na.登录\nb.注册\n其他.退出聊天室\n");
         char ch;
         scanf("%c", &ch);
         switch (ch)
@@ -211,7 +233,7 @@ int ChatRoomRegister(int sockfd)
     json_object_object_add(jobj, "type", json_object_new_string("register"));
     json_object_object_add(jobj, "name", json_object_new_string(name));
     json_object_object_add(jobj, "password", json_object_new_string(password));
-    char *json = json_object_to_json_string(jobj);
+    const char *json = json_object_to_json_string(jobj);
 
     /* 发送json */
     /*
@@ -233,9 +255,10 @@ int ChatRoomRegister(int sockfd)
             name:待处理消息数
 
     */
-    RecvJsonFromServer(sockfd, json);
+    char retJson[CONTENT_SIZE] = {0};
+    RecvJsonFromServer(sockfd, retJson);
 
-    json_object *jreceipt = json_object_object_get(json_tokener_parse(json), "receipt");
+    json_object *jreceipt = json_object_object_get(json_tokener_parse(retJson), "receipt");
     if (jreceipt == NULL)
     {
         printf("注册失败\n");
@@ -244,7 +267,7 @@ int ChatRoomRegister(int sockfd)
         return JSON_ERROR;
     }
 
-    char *receipt = json_object_get_string(jreceipt);
+    const char *receipt = json_object_get_string(jreceipt);
     if (strcmp(receipt, "success") == 0)
     {
         printf("注册成功\n");
@@ -278,7 +301,7 @@ int ChatRoomLogin(int sockfd)
     json_object_object_add(jobj, "type", json_object_new_string("login"));
     json_object_object_add(jobj, "name", json_object_new_string(name));
     json_object_object_add(jobj, "password", json_object_new_string(password));
-    char *json = json_object_to_json_string(jobj);
+    const char *json = json_object_to_json_string(jobj);
 
     /*
         发送给服务器的信息：
@@ -288,7 +311,8 @@ int ChatRoomLogin(int sockfd)
 
     /* 等待服务器响应 */
     printf("登录中 ");
-    RecvJsonFromServer(sockfd, json);
+    char retJson[CONTENT_SIZE] = {0};
+    RecvJsonFromServer(sockfd, retJson);
     /*
         预期接收到的服务器信息：
         receipt:success/fail
@@ -299,7 +323,7 @@ int ChatRoomLogin(int sockfd)
             name:待处理消息数
 
     */
-    json_object *jreceipt = json_object_object_get(json_tokener_parse(json), "receipt");
+    json_object *jreceipt = json_object_object_get(json_tokener_parse(retJson), "receipt");
 
     if (jreceipt == NULL)
     {
@@ -309,7 +333,7 @@ int ChatRoomLogin(int sockfd)
         return JSON_ERROR;
     }
 
-    char *receipt = json_object_get_string(jreceipt);
+    const char *receipt = json_object_get_string(jreceipt);
     if (strcmp(receipt, "success") == 0)
     {
         printf("登录成功\n");
@@ -328,10 +352,34 @@ int ChatRoomLogin(int sockfd)
 }
 
 /* 添加好友 */
-int ChatRoomAddFriend(int sockfd, const char *name);
+int ChatRoomAddFriend(int sockfd, const char *name, json_object *friends, const char *username)
+{
+    /* 添加好友信息转化为json，发送给服务器 */
+    json_object *jobj = json_object_new_object();
+    json_object_object_add(jobj, "type", json_object_new_string("addfriend"));
+    json_object_object_add(jobj, "name", json_object_new_string(username));
+    json_object_object_add(jobj, "friend", json_object_new_string(name));
+    const char *json = json_object_to_json_string(jobj);
+    /* 发送json */
+    /*
+        发送给服务器的信息：
+            type:addfriend
+            name:自己的ID
+            friend:好友ID
+    */
+    SendJsonToServer(sockfd, json);
+
+    /* 释放jobj */
+    json_object_put(jobj);
+    /* 将好友加入好友列表 */
+    json_object_object_add(friends, name, json_object_new_int(0));
+    /* 反馈 */
+    printf("好友申请已发送\n");
+    return SUCCESS;
+}
 
 /* 显示好友 */
-int ChatRoomShowFriends(int sockfd, json_object* friends, const char *username)
+int ChatRoomShowFriends(int sockfd, json_object* friends, const char *username, const char * path)
 {
 
     while(1)
@@ -363,26 +411,51 @@ int ChatRoomShowFriends(int sockfd, json_object* friends, const char *username)
         switch (ch)
         {
             case 'a':
+            {
                 printf("请输入要添加的好友:");
                 scanf("%s", name);
-                ChatRoomAddFriend(sockfd, name);
+                ChatRoomAddFriend(sockfd, name, friends, username);
                 memset(name, 0, NAME_SIZE);
                 break;
+            }
             case 'b':
+            {
                 printf("请输入要删除的好友:");
                 scanf("%s", name);
-                ChatRoomDelFriend(sockfd, name);
+                ChatRoomDelFriend(sockfd, name, friends, username);
                 memset(name, 0, NAME_SIZE);
                 break;
+            }
             case 'c':
+            {
                 printf("请输入要私聊的好友:");
                 scanf("%s", name);
-                ChatRoomPrivateChat(sockfd, name, friends,username);
+                /* 判断是否存在好友 */
+                if(json_object_object_get(friends, name) == NULL)
+                {
+                    printf("好友不存在\n");
+                    break;
+                }
+                /* 创建私聊的本地聊天记录文件 */
+                char privateChatRecord[PATH_SIZE] = {0};
+                JoinPath(privateChatRecord, path, name);
+                /* 创建文件 */
+                FILE *fp = fopen(privateChatRecord, "a+");
+                if(fp == NULL)
+                {
+                    printf("创建文件失败\n");
+                    break;
+                }
+                fclose(fp);
+                ChatRoomPrivateChat(sockfd, name, friends,username,privateChatRecord);
                 memset(name, 0, NAME_SIZE);
                 break;
+            }
             case 'd':
+            {
                 /* todo... */
                 break;
+            }
             default:
                 return SUCCESS;
         }
@@ -391,14 +464,16 @@ int ChatRoomShowFriends(int sockfd, json_object* friends, const char *username)
 }
 
 /* 删除好友 */
-int ChatRoomDelFriend(int sockfd, const char *name);
+int ChatRoomDelFriend(int sockfd, const char *name, json_object *friends, const char *username)
+{
+    
+}
 
 /* 私聊 */
-int ChatRoomPrivateChat(int sockfd, const char *name, json_object *friends, const char *username)
+int ChatRoomPrivateChat(int sockfd, const char *name, json_object *friends, const char *username, const char * path)
 {
-    /* 创建私聊的本地聊天记录文件 */
-    char path[PATH_SIZE] = "./userData";
-    sprintf(path, "%s/%s/%s.txt", path, username, name);
+    /* 打开私聊的本地聊天记录文件 */
+
 
     char content[CONTENT_SIZE] = {0};
     while(1)
@@ -410,7 +485,7 @@ int ChatRoomPrivateChat(int sockfd, const char *name, json_object *friends, cons
         json_object_object_add(jobj, "type", json_object_new_string("private"));
         json_object_object_add(jobj, "name", json_object_new_string(name));
         json_object_object_add(jobj, "content", json_object_new_string(content));
-        char *json = json_object_to_json_string(jobj);
+        const char *json = json_object_to_json_string(jobj);
         /*
             发送给服务器的信息：
                 type：private

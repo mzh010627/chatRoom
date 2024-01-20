@@ -15,16 +15,16 @@ int ChatRoomRegister(int sockfd);
 int ChatRoomLogin(int sockfd);
 
 /* 添加好友 */
-int ChatRoomAddFriend(int sockfd, const char *name);
+int ChatRoomAddFriend(int sockfd, const char *name, json_object *friends, const char *username);
 
 /* 显示好友 */
-int ChatRoomShowFriends(int sockfd, json_object* friends, const char *username);
+int ChatRoomShowFriends(int sockfd, json_object* friends, const char *username, const char * path);
 
 /* 删除好友 */
-int ChatRoomDelFriend(int sockfd, const char *name);
+int ChatRoomDelFriend(int sockfd, const char *name, json_object *friends, const char *username);
 
 /* 私聊 */
-int ChatRoomPrivateChat(int sockfd, const char *name, json_object *friends, const char *username);
+int ChatRoomPrivateChat(int sockfd, const char *name, json_object *friends, const char *username, const char * path);
 
 /* 发起群聊 */
 int ChatRoomAddGroupChat(int sockfd, const char *name);
