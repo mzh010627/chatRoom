@@ -43,6 +43,7 @@ enum STATUS_CODE
     JSON_ERROR = -11,   // json错误
     OTHER_ERROR = -12,  // 其他错误
     DATABASE_ERROR = -13,// 数据库错误
+    SETSOCKOPT_ERROR = -14,// 设置socket选项错误
 
 };
 
@@ -51,9 +52,11 @@ static int handleRequest(int client_fd, MYSQL *mysql);
 /* 用户注册 */
 static int userRegister(int client_fd, json_object *json, MYSQL *mysql);
 /* 用户登录 */
-static int userLogin(int client_fd);
+static int userLogin(int client_fd, json_object *json,  MYSQL *mysql);
 /* 数据库查询 */
 static int sqlQuery(const char *sql, MYSQL *mysql, MYSQL_RES **res);
+/* 获取用户的群组和好友列表 */
+static int getUserInfo(const char *name, json_object *json,  MYSQL *mysql);
 
 int main(int argc, char *argv[])
 {
@@ -63,6 +66,14 @@ int main(int argc, char *argv[])
     {
         perror("socket error");
         return SOCKET_ERROR;
+    }
+    // 启用端口复用
+    int reuseaddr = 1;
+    if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &reuseaddr, sizeof(reuseaddr)) == -1)
+    {
+        perror("setsockopt error");
+        close(server_fd);
+        return SETSOCKOPT_ERROR;
     }
     struct sockaddr_in server_addr;
     server_addr.sin_family = AF_INET;
@@ -109,15 +120,40 @@ int main(int argc, char *argv[])
     
     /* 建表 */
     char sql[MAX_SQL_LEN] = {0};
-    sprintf(sql, "create table if not exists users(id int primary key auto_increment, name varchar(20), password varchar(20))");
+    sprintf(sql, "create table if not exists users(id int primary key auto_increment, name varchar(%d), password varchar(%d))", NAME_SIZE, PASSWORD_SIZE);
     int sql_ret = mysql_query(mysql, sql);
     if (sql_ret != 0)
     {
         perror("create table error");
         return DATABASE_ERROR;
     }
-    printf("create table success\n");
-
+    printf("create users table success\n");
+    /* 好友关系表 */
+    sprintf(sql, "create table if not exists friends(id int primary key auto_increment, name varchar(%d), friend_name varchar(%d), messages_num int(2))", NAME_SIZE,NAME_SIZE);
+    sql_ret = mysql_query(mysql, sql);
+    if (sql_ret != 0)
+    {
+        perror("create table error");
+        return DATABASE_ERROR;
+    }
+    printf("create friends table success\n");
+    /* 群组表 */
+    sprintf(sql, "create table if not exists chatgroups(id int primary key auto_increment, groupMainName varchar(%d), group_name varchar(%d))", NAME_SIZE, NAME_SIZE);  // groups 这个表名不能用
+    sql_ret = mysql_query(mysql, sql);
+    if (sql_ret != 0)
+    {
+        perror("create table error");
+        return DATABASE_ERROR;
+    }
+    printf("create groups table success\n");
+    /* 群组成员表 */
+    sprintf(sql, "create table if not exists group_members(id int primary key auto_increment, group_name varchar(%d), member_name varchar(%d))", NAME_SIZE, NAME_SIZE);
+    sql_ret = mysql_query(mysql, sql);
+    if (sql_ret != 0)
+    {
+        perror("create table error");
+        return DATABASE_ERROR;
+    }
 
     /* 启动服务 */
     while (1)
@@ -137,7 +173,7 @@ int main(int argc, char *argv[])
 
         /* 处理请求 */
         handleRequest(client_fd,mysql);
-        break;
+        // break;
     }
     close(server_fd);
     return 0;
@@ -195,7 +231,9 @@ static int handleRequest(int client_fd, MYSQL *mysql)
         else if(strcmp(typeStr, "login") == 0)
         {
             /* 登录 */
-            userLogin(client_fd);
+            /* 消除没用的请求类型*/
+            json_object_object_del(jobj, "type");
+            userLogin(client_fd, jobj, mysql);
         }
         else
         {
@@ -237,7 +275,6 @@ static int userRegister(int client_fd, json_object *json,  MYSQL *mysql)
     {
         /* 处理数据库查询结果 */
         int num_rows = mysql_num_rows(res);     // 行数
-        int num_fields = mysql_num_fields(res); // 列数
         if (num_rows > 0)
         {
             json_object_object_add(returnJson, "receipt", json_object_new_string("fail"));
@@ -272,6 +309,13 @@ static int userRegister(int client_fd, json_object *json,  MYSQL *mysql)
     json_object_put(json);
     json_object_put(returnJson);
 
+    /* 释放结果集 */
+    if (res != NULL)
+    {
+        mysql_free_result(res);
+        res = NULL;
+    }
+
     if (ret == -1)
     {
         perror("send error");
@@ -280,9 +324,135 @@ static int userRegister(int client_fd, json_object *json,  MYSQL *mysql)
     return SUCCESS;
 }
 
-static int userLogin(int client_fd)
+/* 登录 */
+static int userLogin(int client_fd, json_object *json,  MYSQL *mysql)
 {
-    return 0;
+    printf("登录\n");
+    /* 返回用json */
+    json_object *returnJson = json_object_new_object();
+    /* 获取json中的内容 */
+    const char *name = json_object_get_string(json_object_object_get(json, "name"));
+    const char *password = json_object_get_string(json_object_object_get(json, "password"));
+    printf("name: %s\n", name);
+    printf("password: %s\n", password);
+    /* 查询数据库 */
+    char sql[MAX_SQL_LEN] = {0};
+    sprintf(sql, "select password from users where name='%s'", name);
+    printf("sql: %s\n", sql);
+    MYSQL_RES *res = NULL;
+    int sql_ret = sqlQuery(sql, mysql, &res);
+    if (sql_ret != 0)
+    {
+        printf("sql query error\n");
+        json_object_object_add(returnJson, "receipt", json_object_new_string("fail"));
+        json_object_object_add(returnJson, "reason", json_object_new_string("数据库查询错误"));
+    }
+    else
+    {
+        /* 处理数据库查询结果 */
+        int num_rows = mysql_num_rows(res);     // 行数
+        if (num_rows > 0)
+        {
+            /* 判断密码是否正确 */
+            MYSQL_ROW row = mysql_fetch_row(res);
+            const char *dbPassword = row[0];
+            if (strcmp(password, dbPassword) == 0)
+            {
+                /* 登录成功 */
+                json_object_object_add(returnJson, "receipt", json_object_new_string("success"));
+                json_object_object_add(returnJson, "name", json_object_new_string(name));
+                getUserInfo(name, returnJson, mysql);
+            }
+            else
+            {
+                /* 密码错误 */
+                json_object_object_add(returnJson, "receipt", json_object_new_string("fail"));
+                json_object_object_add(returnJson, "reason", json_object_new_string("密码错误"));
+            }
+        }
+        else
+        {
+            /* 用户名不存在 */
+            json_object_object_add(returnJson, "receipt", json_object_new_string("fail"));
+            json_object_object_add(returnJson, "reason", json_object_new_string("用户名不存在"));
+        }
+    }
+    /* 发送json */
+    const char *sendJson = json_object_to_json_string(returnJson);
+    printf("send json: %s\n", sendJson);
+    int ret = send(client_fd, sendJson, strlen(sendJson), 0);
+    /* 释放json */
+    json_object_put(json);
+    json_object_put(returnJson);
+    /* 释放结果集 */
+    if (res != NULL)
+    {
+        mysql_free_result(res);
+        res = NULL;
+    }
+    if (ret == -1)
+    {
+        perror("send error");
+        return SEND_ERROR;
+    }
+    return SUCCESS;
+}
+
+/* 获取用户的群组和好友列表 */
+static int getUserInfo(const char *name, json_object *json,  MYSQL *mysql)
+{
+    MYSQL_RES *res = NULL;
+    char sql[MAX_SQL_LEN] = {0};
+    /* 查好友列表 */
+    sprintf(sql, "select friend_name,messages_num from friends where name='%s'", name);
+    int sql_ret = sqlQuery(sql, mysql, &res);
+    if (sql_ret != 0)
+    {
+        perror("sql query error");
+        return DATABASE_ERROR;
+    }
+    MYSQL_ROW row;
+    int num_rows = mysql_num_rows(res);     // 行数
+    int i = 0;
+    json_object *friends = json_object_new_array();
+    while ((row = mysql_fetch_row(res)))
+    {
+        json_object *friend = json_object_new_object();
+        json_object_object_add(friend, "name", json_object_new_string(row[0]));
+        json_object_object_add(friend, "messages_num", json_object_new_int(atoi(row[1])));
+        json_object_array_add(friends, friend);
+        i++;
+        if (i == num_rows)
+        {
+            break;
+        }
+    }
+    json_object_object_add(json, "friends", friends);
+    mysql_free_result(res);
+    /* 查群组列表 */
+    sprintf(sql, "select group_name from group_members where groupMainName='%s'", name);
+    sql_ret = sqlQuery(sql, mysql, &res);
+    if (sql_ret != 0)
+    {
+        perror("sql query error");
+        return DATABASE_ERROR;
+    }
+    num_rows = mysql_num_rows(res);     // 行数
+    i = 0;
+    json_object *groups = json_object_new_array();
+    while ((row = mysql_fetch_row(res)))
+    {
+        json_object *group = json_object_new_object();
+        json_object_object_add(group, "name", json_object_new_string(row[1]));
+        json_object_array_add(groups, group);
+        i++;
+        if (i == num_rows)
+        {
+            break;
+        }
+    }
+    json_object_object_add(json, "groups", groups);
+    mysql_free_result(res);
 }
 
 /* 数据库查询 */
