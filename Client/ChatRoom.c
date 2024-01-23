@@ -225,8 +225,8 @@ int ChatRoomRegister(int sockfd)
     printf("注册\n");
     printf("请输入账号:");
     scanf("%s", name);
-    printf("请输入密码:");
-    scanf("%s", password);
+    /* 不显示输入的密码 */
+    strncpy(password, getpass("请输入密码:"), PASSWORD_SIZE);
 
     /* 注册信息转化为json，发送给服务器 */
     json_object *jobj = json_object_new_object();
@@ -303,8 +303,8 @@ int ChatRoomLogin(int sockfd)
     printf("登录\n");
     printf("请输入账号:");
     scanf("%s", name);
-    printf("请输入密码:");
-    scanf("%s", password);
+    /* 不显示输入的密码 */
+    strncpy(password, getpass("请输入密码:"), PASSWORD_SIZE);
     /* 登录信息转化为json，发送给服务器 */
     json_object *jobj = json_object_new_object();
     json_object_object_add(jobj, "type", json_object_new_string("login"));
