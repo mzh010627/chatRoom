@@ -12,6 +12,7 @@
 #include <signal.h>
 #include <time.h>
 #include <json-c/json.h>
+#include <mysql/mysql.h>
 
 
 #define SERVER_PORT 8888        // 服务器端口号,暂定为8888
@@ -23,6 +24,7 @@
 #define MAX_GROUP_MEMBERS_NUM 20// 最大群组成员数量
 #define CONTENT_SIZE 1024       // 信息内容长度
 #define PATH_SIZE 256           // 文件路径长度
+#define MAX_SQL_LEN 1024        // sql语句长度
 
 /* 状态码 */
 enum STATUS_CODE
@@ -40,16 +42,18 @@ enum STATUS_CODE
     FILE_ERROR = -10,   // 文件错误
     JSON_ERROR = -11,   // json错误
     OTHER_ERROR = -12,  // 其他错误
+    DATABASE_ERROR = -13,// 数据库错误
 
 };
 
-/* 接收请求并分类 */
-static int handleRequest(int client_fd);
+/* 接收请求并分类/处理请求 */
+static int handleRequest(int client_fd, MYSQL *mysql);
 /* 用户注册 */
-static int userRegister(int client_fd, json_object *json);
+static int userRegister(int client_fd, json_object *json, MYSQL *mysql);
 /* 用户登录 */
 static int userLogin(int client_fd);
-
+/* 数据库查询 */
+static int sqlQuery(const char *sql, MYSQL *mysql, MYSQL_RES **res);
 
 int main(int argc, char *argv[])
 {
@@ -64,12 +68,16 @@ int main(int argc, char *argv[])
     server_addr.sin_family = AF_INET;
     server_addr.sin_port = htons(SERVER_PORT);
     server_addr.sin_addr.s_addr = INADDR_ANY;
+
+    /* 绑定服务器信息 */
     int ret = bind(server_fd, (struct sockaddr *)&server_addr, sizeof(server_addr));
     if (ret < 0)
     {
         perror("bind error");
         return CONNECT_ERROR;
     }
+
+    /* 开始监听 */
     ret = listen(server_fd, 10);
     if (ret < 0)
     {
@@ -77,6 +85,40 @@ int main(int argc, char *argv[])
         return CONNECT_ERROR;
     }
     printf("server start success\n");
+
+    /* 初始化数据库 */
+    MYSQL *mysql = mysql_init(NULL);
+    if (mysql == NULL)
+    {
+        perror("mysql_init error");
+        return DATABASE_ERROR;
+    }
+
+    /* 连接数据库 */
+    mysql_real_connect(mysql, "localhost", "root", "52671314", "test", 3306, NULL, 0);
+    if (mysql == NULL)
+    {
+        perror("mysql_real_connect error");
+        return DATABASE_ERROR;
+    }
+    printf("database connect success\n");
+    /* 设置字符集 */
+    mysql_set_character_set(mysql, "utf8");
+    /* 设置编码 */
+    mysql_options(mysql, MYSQL_SET_CHARSET_NAME, "utf8");
+    
+    /* 建表 */
+    char sql[MAX_SQL_LEN] = {0};
+    sprintf(sql, "create table if not exists users(id int primary key auto_increment, name varchar(20), password varchar(20))");
+    int sql_ret = mysql_query(mysql, sql);
+    if (sql_ret != 0)
+    {
+        perror("create table error");
+        return DATABASE_ERROR;
+    }
+    printf("create table success\n");
+
+
     /* 启动服务 */
     while (1)
     {
@@ -94,7 +136,7 @@ int main(int argc, char *argv[])
         printf("client connect success\n");
 
         /* 处理请求 */
-        handleRequest(client_fd);
+        handleRequest(client_fd,mysql);
         break;
     }
     close(server_fd);
@@ -102,11 +144,12 @@ int main(int argc, char *argv[])
 }
 
 /* 处理请求 */
-static int handleRequest(int client_fd)
+static int handleRequest(int client_fd, MYSQL *mysql)
 {
     char recvJson[CONTENT_SIZE] = {0};
     while(1)
     {
+        /* 接收json字符串 */
         int ret = recv(client_fd, recvJson, CONTENT_SIZE, 0);
         if (ret == -1)
         {
@@ -141,12 +184,13 @@ static int handleRequest(int client_fd)
             printf("json type error\n");
             return JSON_ERROR;
         }
+        /* 分类处理请求 */
         if(strcmp(typeStr, "register") == 0)
         {
             /* 注册 */
             /* 消除没用的请求类型*/
             json_object_object_del(jobj, "type");
-            userRegister(client_fd,jobj);
+            userRegister(client_fd, jobj, mysql);
         }
         else if(strcmp(typeStr, "login") == 0)
         {
@@ -166,22 +210,68 @@ static int handleRequest(int client_fd)
 }
 
 /* 注册 */
-int userRegister(int client_fd, json_object *json)
+static int userRegister(int client_fd, json_object *json,  MYSQL *mysql)
 {
     printf("注册\n");
     const char *name = json_object_get_string(json_object_object_get(json, "name"));
     const char *password = json_object_get_string(json_object_object_get(json, "password"));
     printf("name: %s\n", name);
     printf("password: %s\n", password);
-    /* 释放json */
-    json_object_put(json);
-    /* 返回json */
-    json = json_object_new_object();
-    json_object_object_add(json, "receipt", json_object_new_string("success"));
-    const char *sendJson = json_object_to_json_string(json);
+
+    /* 返回用json */
+    json_object *returnJson = json_object_new_object();
+
+    /* 查询数据库 */
+    char sql[MAX_SQL_LEN] = {0};
+    sprintf(sql, "select * from users where name='%s'", name);
+    printf("sql: %s\n", sql);
+    MYSQL_RES *res = NULL;
+    int sql_ret = sqlQuery(sql, mysql, &res);
+    if (sql_ret != 0)
+    {
+        printf("sql query error\n");
+        json_object_object_add(returnJson, "receipt", json_object_new_string("fail"));
+        json_object_object_add(returnJson, "reason", json_object_new_string("数据库查询错误"));
+    }
+    else
+    {
+        /* 处理数据库查询结果 */
+        int num_rows = mysql_num_rows(res);     // 行数
+        int num_fields = mysql_num_fields(res); // 列数
+        if (num_rows > 0)
+        {
+            json_object_object_add(returnJson, "receipt", json_object_new_string("fail"));
+            json_object_object_add(returnJson, "reason", json_object_new_string("用户名已存在"));
+        }
+        else
+        {
+            /* 插入数据库 */
+            sprintf(sql, "insert into users(name, password) values('%s', '%s')", name, password);
+            sql_ret = mysql_query(mysql, sql);
+            if (sql_ret != 0)
+            {
+                printf("sql insert error\n");
+                json_object_object_add(returnJson, "receipt", json_object_new_string("fail"));
+                json_object_object_add(returnJson, "reason", json_object_new_string("数据库插入错误"));
+            }
+            else
+            {
+                printf("sql: %s\n", sql);
+                json_object_object_add(returnJson, "receipt", json_object_new_string("success"));
+                json_object_object_add(returnJson, "name", json_object_new_string(name));
+            }
+        }
+    }
+
+    const char *sendJson = json_object_to_json_string(returnJson);
     printf("send json: %s\n", sendJson);
     /* 发送json */
     int ret = send(client_fd, sendJson, strlen(sendJson), 0);
+
+    /* 释放json */
+    json_object_put(json);
+    json_object_put(returnJson);
+
     if (ret == -1)
     {
         perror("send error");
@@ -190,7 +280,25 @@ int userRegister(int client_fd, json_object *json)
     return SUCCESS;
 }
 
-int userLogin(int client_fd)
+static int userLogin(int client_fd)
 {
     return 0;
+}
+
+/* 数据库查询 */
+static int sqlQuery(const char *sql, MYSQL *mysql, MYSQL_RES **res)
+{
+    int sql_ret = mysql_query(mysql, sql);
+    if (sql_ret != 0)
+    {
+        perror("sql query error");
+        return DATABASE_ERROR;
+    }
+    *res = mysql_store_result(mysql);
+    if (*res == NULL)
+    {
+        perror("sql store result error");
+        return DATABASE_ERROR;
+    }
+    return SUCCESS;
 }

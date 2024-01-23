@@ -238,11 +238,14 @@ int ChatRoomRegister(int sockfd)
     /*
         预期接收到的服务器信息：
         receipt:success/fail
+        (success)
         name:自己的ID
         friends:
             name:待处理消息数
         groups:
             name:待处理消息数
+        (fail)
+        reason:失败原因
 
     */
     char retJson[CONTENT_SIZE] = {0};
@@ -263,13 +266,19 @@ int ChatRoomRegister(int sockfd)
         printf("注册成功\n");
         json_object_put(jobj);
         json_object_object_del(jreceipt, "receipt");    // 删除掉多余的回执数据
+        /* 初始化好友列表和群组列表 */
+        json_object *friends = json_object_new_array();
+        json_object *groups = json_object_new_array();
+        json_object_object_add(jreceipt, "friends", friends);
+        json_object_object_add(jreceipt, "groups", groups);
         ChatRoomMain(sockfd,jreceipt);  
     }
     else
     {
-        printf("注册失败\n");
-        json_object_put(jreceipt);
+        const char *reason = json_object_get_string(json_object_object_get(jreceipt,"reason"));
+        printf("注册失败:%s\n",reason);
         json_object_put(jobj);
+        json_object_put(jreceipt);
     }
 
     return SUCCESS;
