@@ -414,13 +414,10 @@ static int getUserInfo(const char *name, json_object *json,  MYSQL *mysql)
     MYSQL_ROW row;
     int num_rows = mysql_num_rows(res);     // 行数
     int i = 0;
-    json_object *friends = json_object_new_array();
+    json_object *friends = json_object_new_object();
     while ((row = mysql_fetch_row(res)))
     {
-        json_object *friend = json_object_new_object();
-        json_object_object_add(friend, "name", json_object_new_string(row[0]));
-        json_object_object_add(friend, "messages_num", json_object_new_int(atoi(row[1])));
-        json_object_array_add(friends, friend);
+        json_object_object_add(friends, row[0], json_object_new_int(atoi(row[1])));
         i++;
         if (i == num_rows)
         {
