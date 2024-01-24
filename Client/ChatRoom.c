@@ -44,6 +44,9 @@ enum STATUS_CODE
 #define PATH_SIZE 256           // 文件路径长度
 
 
+/* 静态声明 */
+/* 登录成功的主界面 */
+static int ChatRoomMain(int fd, json_object *json);
 
 /* 发送json到服务器 */
 static int SendJsonToServer(int fd, const char *json)
@@ -93,56 +96,6 @@ static int JoinPath(char *path, const char *dir, const char *filename)
     return SUCCESS;
 }
 
-/* 登录成功的主界面 */
-static int ChatRoomMain(int fd, json_object *json)
-{
-    
-    /* 用户名 */
-    json_object *usernameJson = json_object_object_get(json, "name");
-    if(usernameJson == NULL)
-    {
-        printf("json_object_object_get error\n");
-        return JSON_ERROR;
-    }
-    const char *username = json_object_get_string(usernameJson);
-    
-    /* 创建用户本地数据目录 */
-    char path[PATH_SIZE] = {0};
-    JoinPath(path, "./usersData", username);
-    if(access(path, F_OK) == -1)
-    {
-        if (mkdir(path, 0777) == -1)
-        {
-            perror("mkdir error");
-            return MALLOC_ERROR;
-        }
-    }
-    /* 好友列表 */
-    json_object * friends = json_object_object_get(json, "friends");
-    /* 群组列表 */
-    json_object * groups = json_object_object_get(json, "groups");
-    /* 显示好友列表和群组列表 */
-    printf("a.显示好友列表\nb.显示群聊列表\ne.退出聊天室\n其他无效");
-    char ch;
-    scanf("%c", &ch);
-    switch (ch)
-    {
-        case 'a':
-            ChatRoomShowFriends(fd, friends,username, path);
-            break;
-        case 'b':
-            ChatRoomShowGroupChat(fd, groups,username);
-            break;
-        case 'e':
-            /* todo... */
-            break;
-        default:
-            printf("无效操作\n");
-            break;
-    }
-    
-    return SUCCESS;
-}
 
 /* 聊天室初始化 */
 int ChatRoomInit()
@@ -180,7 +133,9 @@ int ChatRoomInit()
     {
         printf("请输入要进行的功能:\na.登录\nb.注册\n其他.退出聊天室\n");
         char ch;
-        scanf("%c", &ch);
+        while ((ch = getchar()) == '\n');   // 读取一个非换行的字符
+        while ((getchar()) != '\n');        // 吸收多余的字符
+        printf("ch:%d\n",ch);
         switch (ch)
         {
             case 'a':
@@ -215,8 +170,8 @@ int ChatRoomRegister(int sockfd)
     printf("注册\n");
     printf("请输入账号:");
     scanf("%s", name);
-    printf("请输入密码:");
-    scanf("%s", password);
+    /* 不显示输入的密码 */
+    strncpy(password, getpass("请输入密码:"), PASSWORD_SIZE);
 
     /* 注册信息转化为json，发送给服务器 */
     json_object *jobj = json_object_new_object();
@@ -238,11 +193,14 @@ int ChatRoomRegister(int sockfd)
     /*
         预期接收到的服务器信息：
         receipt:success/fail
+        (success)
         name:自己的ID
         friends:
             name:待处理消息数
         groups:
             name:待处理消息数
+        (fail)
+        reason:失败原因
 
     */
     char retJson[CONTENT_SIZE] = {0};
@@ -263,13 +221,19 @@ int ChatRoomRegister(int sockfd)
         printf("注册成功\n");
         json_object_put(jobj);
         json_object_object_del(jreceipt, "receipt");    // 删除掉多余的回执数据
+        /* 初始化好友列表和群组列表 */
+        json_object *friends = json_object_new_array();
+        json_object *groups = json_object_new_array();
+        json_object_object_add(jreceipt, "friends", friends);
+        json_object_object_add(jreceipt, "groups", groups);
         ChatRoomMain(sockfd,jreceipt);  
     }
     else
     {
-        printf("注册失败\n");
-        json_object_put(jreceipt);
+        const char *reason = json_object_get_string(json_object_object_get(jreceipt,"reason"));
+        printf("注册失败:%s\n",reason);
         json_object_put(jobj);
+        json_object_put(jreceipt);
     }
 
     return SUCCESS;
@@ -284,8 +248,8 @@ int ChatRoomLogin(int sockfd)
     printf("登录\n");
     printf("请输入账号:");
     scanf("%s", name);
-    printf("请输入密码:");
-    scanf("%s", password);
+    /* 不显示输入的密码 */
+    strncpy(password, getpass("请输入密码:"), PASSWORD_SIZE);
     /* 登录信息转化为json，发送给服务器 */
     json_object *jobj = json_object_new_object();
     json_object_object_add(jobj, "type", json_object_new_string("login"));
@@ -313,7 +277,7 @@ int ChatRoomLogin(int sockfd)
             name:待处理消息数
 
     */
-    json_object *jreceipt = json_object_object_get(json_tokener_parse(retJson), "receipt");
+    json_object *jreceipt = json_tokener_parse(retJson);
 
     if (jreceipt == NULL)
     {
@@ -323,7 +287,7 @@ int ChatRoomLogin(int sockfd)
         return JSON_ERROR;
     }
 
-    const char *receipt = json_object_get_string(jreceipt);
+    const char *receipt = json_object_get_string(json_object_object_get(jreceipt,"receipt"));
     if (strcmp(receipt, "success") == 0)
     {
         printf("登录成功\n");
@@ -333,13 +297,15 @@ int ChatRoomLogin(int sockfd)
     }
     else
     {
-        printf("登录失败\n");
+        const char *reason = json_object_get_string(json_object_object_get(jreceipt,"reason"));
+        printf("登录失败:%s\n",reason);
         json_object_put(jreceipt);
         json_object_put(jobj);
         return SUCCESS;
     }
     return SUCCESS;
 }
+
 
 /* 添加好友 */
 int ChatRoomAddFriend(int sockfd, const char *name, json_object *friends, const char *username)
@@ -368,36 +334,66 @@ int ChatRoomAddFriend(int sockfd, const char *name, json_object *friends, const 
     return SUCCESS;
 }
 
+/* 打印好友列表 */
+static int ChatRoomPrintFriends(json_object *friends)
+{
+    printf("好友列表:\n");
+    int jsonLen = json_object_object_length(friends);
+    
+    if(jsonLen == 0)
+    {
+        printf("暂无好友\n");
+        return ILLEGAL_ACCESS;
+    }
+    else
+    {
+        // for(int idx = 0; idx < jsonArrayLen; idx++)
+        // {
+        //     json_object *friend = json_object_array_get_idx(friends, idx);
+        //     const char *name = json_object_get_string(json_object_object_get(friend, "name"));
+        //     const int messages_num = json_object_get_int(json_object_object_get(friend, "messages_num"));
+        //     if(messages_num > 0)
+        //     {
+        //         printf("%s(%d)\n", name, messages_num);
+        //     }
+        //     else
+        //     {
+        //         printf("%s\n", name);
+        //     }
+        // }
+        json_object_object_foreach(friends, key, value)
+        {
+            const char *name = key;
+            const int messages_num = json_object_get_int(value);
+            if(messages_num > 0)
+            {
+                printf("%s(%d)\n", name, messages_num);
+            }
+            else
+            {
+                printf("%s\n", name);
+            }
+        }
+        
+    }
+    return SUCCESS;
+}
+
 /* 显示好友 */
 int ChatRoomShowFriends(int sockfd, json_object* friends, const char *username, const char * path)
 {
 
     while(1)
-    {    
-        printf("好友列表:\n");
-        if(json_object_array_length(friends) == 0)
+    {   
+        if (ChatRoomPrintFriends(friends) != SUCCESS)
         {
-            printf("暂无好友\n");
             return SUCCESS;
-        }
-        else
-        {
-            json_object_object_foreach(friends, key, value)
-            {
-                if(value != 0)
-                {
-                    printf("\t%s*\n", key);
-                }
-                else
-                {
-                    printf("\t%s\n", key);
-                }
-            }
         }
         printf("a.添加好友\nb.删除好友\nc.私聊\nd.退出\n其他.返回上一级");
         char ch;
         char name[NAME_SIZE] = {0};
-        scanf("%c", &ch);
+        while ((ch = getchar()) == '\n');   // 读取一个非换行的字符
+        while ((getchar()) != '\n');        // 吸收多余的字符
         switch (ch)
         {
             case 'a':
@@ -512,6 +508,7 @@ int ChatRoomShowGroupChat(int sockfd, json_object *groups, const char *username)
         if(json_object_array_length(groups) == 0)
         {
             printf("暂无群组\n");
+            return SUCCESS;
         }
         else
         {
@@ -535,3 +532,63 @@ int ChatRoomGroupChat(int sockfd, const char *name);
 
 /* 退出群聊 */
 int ChatRoomExitGroupChat(int sockfd, const char *name);
+
+
+/* 登录成功的主界面 */
+static int ChatRoomMain(int fd, json_object *json)
+{
+    
+    /* 用户名 */
+    json_object *usernameJson = json_object_object_get(json, "name");
+    if(usernameJson == NULL)
+    {
+        printf("json_object_object_get error\n");
+        return JSON_ERROR;
+    }
+    const char *username = json_object_get_string(usernameJson);
+    
+    /* 创建用户本地数据目录 */
+    char path[PATH_SIZE] = {0};
+    JoinPath(path, "./usersData", username);
+    if(access(path, F_OK) == -1)
+    {
+        if (mkdir(path, 0777) == -1)
+        {
+            perror("mkdir error");
+            return MALLOC_ERROR;
+        }
+    }
+    /* 好友列表 */
+    json_object * friends = json_object_object_get(json, "friends");
+    const char *friend = json_object_get_string(friends);
+    printf("friend:%s\n",friend);
+    /* 群组列表 */
+    json_object * groups = json_object_object_get(json, "groups");
+    const char *group = json_object_get_string(groups);
+    printf("group:%s\n",group);
+    while(1)
+    {
+        /* 显示好友列表和群组列表 */
+        printf("a.显示好友列表\nb.显示群聊列表\ne.退出登录\n其他无效\n");
+        char ch;
+        while ((ch = getchar()) == '\n');   // 读取一个非换行的字符
+        while ((getchar()) != '\n');        // 吸收多余的字符
+        switch (ch)
+        {
+            case 'a':
+                ChatRoomShowFriends(fd, friends,username, path);
+                break;
+            case 'b':
+                ChatRoomShowGroupChat(fd, groups,username);
+                break;
+            case 'e':
+                printf("退出登录\n");
+                return SUCCESS;
+                break;
+            default:
+                printf("无效操作\n");
+        }
+    }
+
+    return SUCCESS;
+}
