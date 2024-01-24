@@ -143,3 +143,22 @@ int main(int argc, char *argv[])
 
     return 0;
 }
+
+int demo()
+{
+    json_object * jobj = json_object_new_object();
+    json_object_object_add(jobj, "name", json_object_new_string("runoob"));
+    json_object_object_add(jobj, "alexa", json_object_new_int(10000));
+    json_object * jarr = json_object_new_array();
+    json_object_array_add(jarr, json_object_new_string("jingdong"));
+    json_object_array_add(jarr, json_object_new_string("pinduoduo"));
+    json_object_array_add(jarr, json_object_new_string("taobao"));
+    json_object_object_add(jobj, "shopping", jarr);
+    json_object * jobj1 = json_object_new_object();
+    json_object_object_add(jobj1, "site1",json_object_new_string("www.runoob.com"));
+    json_object_object_add(jobj1, "site2", json_object_new_string("m.runoob.com"));
+    json_object_object_add(jobj,"sites",jobj1);
+    const char * str = json_object_to_json_string(jobj);
+    printf("%s\n", str);
+    json_object_put(jobj);
+}
