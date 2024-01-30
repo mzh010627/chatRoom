@@ -117,7 +117,7 @@ int main(int argc, char *argv[])
     MYSQL *mysql = mysql_init(NULL);
     if (mysql == NULL)
     {
-        perror("mysql_init error");
+        printf("mysql_init error:%s\n",mysql_error(mysql));
         return DATABASE_ERROR;
     }
 
@@ -126,7 +126,7 @@ int main(int argc, char *argv[])
     mysql_real_connect(mysql, "localhost", "root", "52671314", "test", 3306, NULL, 0);
     if (mysql == NULL)
     {
-        perror("mysql_real_connect error");
+        printf("mysql_real_connect error:%s\n",mysql_error(mysql));
         return DATABASE_ERROR;
     }
     printf("database connect success\n");
@@ -222,6 +222,8 @@ int main(int argc, char *argv[])
 /* 处理请求 */
 void *handleRequest(void* arg)
 {
+    /* 线程分离 */
+    pthread_detach(pthread_self());
     int client_fd = ((TaskArgs*)arg)->client_fd;
     MYSQL *mysql =  ((TaskArgs*)arg)->mysql;
     char recvJson[CONTENT_SIZE] = {0};
@@ -324,7 +326,7 @@ static int userRegister(int client_fd, json_object *json,  MYSQL *mysql)
     int sql_ret = sqlQuery(sql, mysql, &res);
     if (sql_ret != 0)
     {
-        printf("sql query error\n");
+        printf("sql query error:%s\n", mysql_error(mysql));
         json_object_object_add(returnJson, "receipt", json_object_new_string("fail"));
         json_object_object_add(returnJson, "reason", json_object_new_string("数据库查询错误"));
     }
@@ -344,7 +346,7 @@ static int userRegister(int client_fd, json_object *json,  MYSQL *mysql)
             sql_ret = mysql_query(mysql, sql);
             if (sql_ret != 0)
             {
-                printf("sql insert error\n");
+                printf("sql insert error:%s\n", mysql_error(mysql));
                 json_object_object_add(returnJson, "receipt", json_object_new_string("fail"));
                 json_object_object_add(returnJson, "reason", json_object_new_string("数据库插入错误"));
             }
@@ -400,7 +402,7 @@ static int userLogin(int client_fd, json_object *json,  MYSQL *mysql)
     int sql_ret = sqlQuery(sql, mysql, &res);
     if (sql_ret != 0)
     {
-        printf("sql query error\n");
+        printf("sql query error:%s\n", mysql_error(mysql));
         json_object_object_add(returnJson, "receipt", json_object_new_string("fail"));
         json_object_object_add(returnJson, "reason", json_object_new_string("数据库查询错误"));
     }
@@ -466,7 +468,7 @@ static int getUserInfo(const char *name, json_object *json,  MYSQL *mysql)
     int sql_ret = sqlQuery(sql, mysql, &res);
     if (sql_ret != 0)
     {
-        perror("sql query error");
+        printf("sql query error:%s\n", mysql_error(mysql));
         return DATABASE_ERROR;
     }
     MYSQL_ROW row;
@@ -483,13 +485,18 @@ static int getUserInfo(const char *name, json_object *json,  MYSQL *mysql)
         }
     }
     json_object_object_add(json, "friends", friends);
-    mysql_free_result(res);
+    /* 释放结果集 */
+    if (res != NULL)
+    {
+        mysql_free_result(res);
+        res = NULL;
+    }
     /* 查群组列表 */
     sprintf(sql, "select group_name from group_members where groupMainName='%s'", name);
     sql_ret = sqlQuery(sql, mysql, &res);
     if (sql_ret != 0)
     {
-        perror("sql query error");
+        printf("sql query error:%s\n", mysql_error(mysql));
         return DATABASE_ERROR;
     }
     num_rows = mysql_num_rows(res);     // 行数
@@ -507,7 +514,12 @@ static int getUserInfo(const char *name, json_object *json,  MYSQL *mysql)
         }
     }
     json_object_object_add(json, "groups", groups);
-    mysql_free_result(res);
+        /* 释放结果集 */
+    if (res != NULL)
+    {
+        mysql_free_result(res);
+        res = NULL;
+    }
 }
 
 /* 数据库查询 */
@@ -516,13 +528,15 @@ static int sqlQuery(const char *sql, MYSQL *mysql, MYSQL_RES **res)
     int sql_ret = mysql_query(mysql, sql);
     if (sql_ret != 0)
     {
-        perror("sql query error");
+        printf("sql: %s\n", sql);
+        printf("sql_ret:%d\n", sql_ret);
+        printf("sqlQuery error:%s\n", mysql_error(mysql));
         return DATABASE_ERROR;
     }
     *res = mysql_store_result(mysql);
     if (*res == NULL)
     {
-        perror("sql store result error");
+        printf("sql store result error:%s\n", mysql_error(mysql));
         return DATABASE_ERROR;
     }
     return SUCCESS;
@@ -540,7 +554,7 @@ static int updateUserStatus(const char *name, int status, MYSQL *mysql)
     int sql_ret = sqlQuery(sql, mysql, &res);
     if (sql_ret != 0)
     {
-        perror("sql query error");
+        printf("sql query error:%s\n", mysql_error(mysql));
         return DATABASE_ERROR;
     }
 
