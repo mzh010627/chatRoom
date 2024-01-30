@@ -1,13 +1,9 @@
-#自定义变量
-OBJ = main.o ChatRoom.o
-TARGET = a.out
+src=*.c
+client: ${src}
+	gcc ${src} -o client -ljson-c 
 
-#使用变量：$(变量名)
-$(TARGET): $(OBJ)
-	gcc $^ -o $@ -ljson-c 
-
-ChatRoom.o: ChatRoom.c
-	gcc -c $^ -o $@
+g:${src}
+	gcc -g ${src} -o gtest
 
 clean:
-	@rm -rf *.o $(TARGET)
+	@rm -rf	client

@@ -34,7 +34,7 @@ enum STATUS_CODE
 };
 
 #define SERVER_PORT 8888        // 服务器端口号,暂定为8888
-#define SERVER_IP "172.16.157.11"   // 服务器ip,暂定为本机ip
+#define SERVER_IP "172.18.188.222"   // 服务器ip,暂定为本机ip
 #define NAME_SIZE 10            // 用户名长度
 #define PASSWORD_SIZE 20        // 密码长度
 #define MAX_FRIEND_NUM 10       // 最大好友数量
@@ -127,11 +127,16 @@ int ChatRoomInit()
         return CONNECT_ERROR;
     }
 
-
-    printf("欢迎使用网络聊天室\n");
+    printf("\033[1;47m 欢迎使用网络聊天室              \033[0m\n");
+    
     while(1)
     {
-        printf("请输入要进行的功能:\na.登录\nb.注册\n其他.退出聊天室\n");
+        printf("\033[1;47m 请输入要进行的功能:             \033[0m\n");
+        printf("\033[1;47m a.登录                          \033[0m\n");
+        printf("\033[1;47m b.注册                          \033[0m\n");
+        printf("\033[1;47m 其他.退出聊天室                 \033[0m\n");
+        
+        
         char ch;
         while ((ch = getchar()) == '\n');   // 读取一个非换行的字符
         while ((getchar()) != '\n');        // 吸收多余的字符
@@ -244,7 +249,8 @@ int ChatRoomLogin(int sockfd)
 {
     char name[NAME_SIZE] = {0};
     char password[PASSWORD_SIZE] = {0};
-
+    
+    system("clear");
     printf("登录\n");
     printf("请输入账号:");
     scanf("%s", name);

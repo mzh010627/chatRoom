@@ -1,11 +1,9 @@
-#自定义变量
-OBJ = demoServer.o
-TARGET = a.out
+src=*.c
+server: ${src}
+	gcc ${src} -o server -ljson-c -lmysqlclient
 
-#使用变量：$(变量名)
-$(TARGET): $(OBJ)
-	gcc $^ -o $@ -ljson-c -lmysqlclient
-
+g:${src}
+	gcc -g ${src} -o gtest
 
 clean:
-	@rm -rf *.o $(TARGET)
+	@rm -rf server gtest

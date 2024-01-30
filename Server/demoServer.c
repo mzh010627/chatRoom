@@ -16,7 +16,7 @@
 
 
 #define SERVER_PORT 8888        // 服务器端口号,暂定为8888
-#define SERVER_IP "172.16.157.11"   // 服务器ip,暂定为本机ip
+#define SERVER_IP "172.18.188.222"   // 服务器ip,暂定为本机ip
 #define NAME_SIZE 10            // 用户名长度
 #define PASSWORD_SIZE 20        // 密码长度
 #define MAX_FRIEND_NUM 10       // 最大好友数量
@@ -106,7 +106,7 @@ int main(int argc, char *argv[])
     }
 
     /* 连接数据库 */
-    mysql_real_connect(mysql, "localhost", "root", "52671314", "test", 3306, NULL, 0);
+    mysql_real_connect(mysql, "localhost", "root", "1234", "test", 3306, NULL, 0);
     if (mysql == NULL)
     {
         perror("mysql_real_connect error");
@@ -194,7 +194,7 @@ static int handleRequest(int client_fd, MYSQL *mysql)
         }
         if(ret == 0)
         {
-            printf("client disconnect\n");
+            printf("client disconnect 用户下线....\n");
             close(client_fd);
             return SUCCESS;
         }
