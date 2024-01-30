@@ -98,10 +98,10 @@ static void *threadHander(void *arg)
         /* 执行任务 */
         task.function(task.arg);
         /* 释放任务 */
-        free(task.arg);
-        task.arg = NULL;
-        free(task.function);
-        task.function = NULL;
+        // free(task.arg);
+        // task.arg = NULL;
+        // free(task.function);
+        // task.function = NULL;
 
         pthread_mutex_lock(&thread_poll->busyMutex);
         /* 减少busySize */
