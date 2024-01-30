@@ -47,7 +47,7 @@ thread_poll_t;
 /* 线程池初始化 */
 int threadPollInit(thread_poll_t *thread_poll, int minSize, int maxSize, int queueCapacity);
 /* 线程池添加任务 */
-int threadPollAddTask(thread_poll_t *thread_poll, void *(*function)(void *, void *), void *arg, void *arg2);
+int threadPollAddTask(thread_poll_t *thread_poll, void *(*function)(void *), void *arg);
 /* 线程池销毁 */
 int threadPollDestroy(thread_poll_t *thread_poll);
 /* 线程池启动 */
