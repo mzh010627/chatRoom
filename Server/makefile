@@ -1,5 +1,5 @@
 #自定义变量
-OBJ = demoServer.o
+OBJ = $(patsubst %.c, %.o, $(wildcard ./*.c))
 TARGET = a.out
 
 #使用变量：$(变量名)
