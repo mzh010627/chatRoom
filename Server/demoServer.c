@@ -237,6 +237,13 @@ void *handleRequest(void* arg)
         if(ret == 0)
         {
             printf("client disconnect\n");
+            /* 释放参数 */
+            if(arg != NULL)
+            {
+                free(arg);
+                arg = NULL;
+            }
+            /* 释放线程 */
             close(client_fd);
             return NULL;
         }
