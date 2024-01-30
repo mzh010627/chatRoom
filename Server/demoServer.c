@@ -53,8 +53,14 @@ enum STATUS_CODE
 
 };
 
+// 定义结构体来保存任务参数
+typedef struct {
+    int client_fd;
+    MYSQL *mysql;
+} TaskArgs;
+
 /* 接收请求并分类/处理请求 */
-static int handleRequest(int client_fd, MYSQL *mysql);
+void *handleRequest(void* arg);
 /* 用户注册 */
 static int userRegister(int client_fd, json_object *json, MYSQL *mysql);
 /* 用户登录 */
@@ -196,8 +202,16 @@ int main(int argc, char *argv[])
         /* 处理请求 */
         handleRequest(client_fd,mysql);
 #else 
+        TaskArgs *args = (TaskArgs*)malloc(sizeof(TaskArgs));
+        if (args == NULL)
+        {
+            perror("malloc error");
+            continue;
+        }
+        args->client_fd = client_fd;
+        args->mysql = mysql;
         /* 添加到任务队列 */
-        threadPollAddTask(&poll, handleRequest, client_fd, mysql);
+        threadPollAddTask(&poll, handleRequest, (void*)args);
 #endif
         // break;
     }
@@ -206,8 +220,10 @@ int main(int argc, char *argv[])
 }
 
 /* 处理请求 */
-static int handleRequest(int client_fd, MYSQL *mysql)
+void *handleRequest(void* arg)
 {
+    int client_fd = ((TaskArgs*)arg)->client_fd;
+    MYSQL *mysql =  ((TaskArgs*)arg)->mysql;
     char recvJson[CONTENT_SIZE] = {0};
     while(1)
     {
@@ -216,13 +232,13 @@ static int handleRequest(int client_fd, MYSQL *mysql)
         if (ret == -1)
         {
             perror("recv error");
-            return RECV_ERROR;
+            return NULL;
         }
         if(ret == 0)
         {
             printf("client disconnect\n");
             close(client_fd);
-            return SUCCESS;
+            return NULL;
         }
         printf("recv json: %s\n", recvJson);
         /* 解析json */
@@ -230,21 +246,21 @@ static int handleRequest(int client_fd, MYSQL *mysql)
         if (jobj == NULL)
         {
             printf("json parse error\n");
-            return JSON_ERROR;
+            return NULL;
         }
         /* 获取json中的type */
         json_object *type = json_object_object_get(jobj, "type");
         if (type == NULL)
         {
             printf("json type error\n");
-            return JSON_ERROR;
+            return NULL;
         }
         /* 获取json中的内容 */
         const char *typeStr = json_object_get_string(type);
         if (typeStr == NULL)
         {
             printf("json type error\n");
-            return JSON_ERROR;
+            return NULL;
         }
         /* 分类处理请求 */
         if(strcmp(typeStr, "register") == 0)
@@ -273,7 +289,7 @@ static int handleRequest(int client_fd, MYSQL *mysql)
         {
             /* 其他 */
             printf("json type error\n");
-            return JSON_ERROR;
+            return NULL;
         }
 
 
