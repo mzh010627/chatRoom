@@ -457,24 +457,27 @@ int ChatRoomPrivateChat(int sockfd, const char *name, json_object *friends, cons
     /* 打开私聊的本地聊天记录文件 */
 
 
-    char content[CONTENT_SIZE] = {0};
+    char message[CONTENT_SIZE] = {0};
     while(1)
     {
         printf("请输入要私聊的内容:");
-        scanf("%s", content);
+        scanf("%s", message);
         /* 私聊信息转化为json，发送给服务器 */
         json_object *jobj = json_object_new_object();
         json_object_object_add(jobj, "type", json_object_new_string("private"));
-        json_object_object_add(jobj, "name", json_object_new_string(name));
-        json_object_object_add(jobj, "content", json_object_new_string(content));
+        json_object_object_add(jobj, "name", json_object_new_string(username));
+        json_object_object_add(jobj, "friendName", json_object_new_string(name));
+        json_object_object_add(jobj, "message", json_object_new_string(message));
         const char *json = json_object_to_json_string(jobj);
         /*
             发送给服务器的信息：
                 type：private
-                name：好友名
-                content：私聊内容
+                name: 用户名
+                friendName：好友名
+                message：私聊内容
         */
         SendJsonToServer(sockfd, json);
+        break;
     }
 }
 
@@ -486,7 +489,7 @@ int ChatRoomRecvMsg(int sockfd, json_object *friends)
             type:private/group
             name:发信人
             toname:收信人
-            content:消息内容
+            message:消息内容
             time:发送时间
     */
 }
