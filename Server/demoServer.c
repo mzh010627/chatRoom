@@ -158,6 +158,7 @@ int main(int argc, char *argv[])
     sql_ret = mysql_query(mysql, sql);
     if (sql_ret != 0)
     {
+
         printf("create friends table error:%s\n", mysql_error(mysql));
         return DATABASE_ERROR;
     }
@@ -167,6 +168,7 @@ int main(int argc, char *argv[])
     sql_ret = mysql_query(mysql, sql);
     if (sql_ret != 0)
     {
+
         printf("create chatgroups table error:%s\n", mysql_error(mysql));
         return DATABASE_ERROR;
     }
@@ -758,7 +760,6 @@ static int userLogout(int client_fd, json_object *json,  MYSQL *mysql)
     }
     return SUCCESS;
 }
-
 /* 获取当前时间 */
 static char *getCurrentTime()
 {
