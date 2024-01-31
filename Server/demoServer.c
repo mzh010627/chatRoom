@@ -69,6 +69,10 @@ static int userLogin(int client_fd, json_object *json,  MYSQL *mysql);
 static int sqlQuery(const char *sql, MYSQL *mysql, MYSQL_RES **res);
 /* 获取用户的群组和好友列表 */
 static int getUserInfo(const char *name, json_object *json,  MYSQL *mysql);
+/* 更新用户在线状态 */
+static int updateUserStatus(const char *name, int status, MYSQL *mysql);
+/* 退出登录 */
+static int userLogout(int client_fd, json_object *json,  MYSQL *mysql);
 
 int main(int argc, char *argv[])
 {
@@ -146,7 +150,7 @@ int main(int argc, char *argv[])
     }
     printf("create users table success\n");
     /* 好友关系表 */
-    sprintf(sql, "create table if not exists friends(id int primary key auto_increment, name varchar(%d), friend_name varchar(%d), messages_num int(2))", NAME_SIZE,NAME_SIZE);
+    sprintf(sql, "create table if not exists friends(id int primary key auto_increment, name varchar(%d), friend_name varchar(%d), messages_num int(2) not NULL)", NAME_SIZE,NAME_SIZE);
     sql_ret = mysql_query(mysql, sql);
     if (sql_ret != 0)
     {
@@ -164,7 +168,7 @@ int main(int argc, char *argv[])
     }
     printf("create groups table success\n");
     /* 群组成员表 */
-    sprintf(sql, "create table if not exists group_members(id int primary key auto_increment, group_name varchar(%d), member_name varchar(%d))", NAME_SIZE, NAME_SIZE);
+    sprintf(sql, "create table if not exists group_members(id int primary key auto_increment, group_name varchar(%d), member_name varchar(%d), messages_num int(2) not NULL)", NAME_SIZE, NAME_SIZE);
     sql_ret = mysql_query(mysql, sql);
     if (sql_ret != 0)
     {
@@ -224,6 +228,7 @@ void *handleRequest(void* arg)
 {
     /* 线程分离 */
     pthread_detach(pthread_self());
+    printf("handleRequest start\n");
     int client_fd = ((TaskArgs*)arg)->client_fd;
     MYSQL *mysql =  ((TaskArgs*)arg)->mysql;
     char recvJson[CONTENT_SIZE] = {0};
@@ -239,6 +244,15 @@ void *handleRequest(void* arg)
         if(ret == 0)
         {
             printf("client disconnect\n");
+            /* 移除在线状态 */
+            char sql[MAX_SQL_LEN] = {0};
+            sprintf(sql, "delete from online_users where client_fd = %d", client_fd);
+            int sql_ret = mysql_query(mysql, sql);
+            if (sql_ret != 0)
+            {
+                printf("delete online_users error:%s\n", mysql_error(mysql));
+                return NULL;
+            }
             /* 释放参数 */
             if(arg != NULL)
             {
@@ -285,6 +299,13 @@ void *handleRequest(void* arg)
             /* 消除没用的请求类型*/
             json_object_object_del(jobj, "type");
             userLogin(client_fd, jobj, mysql);
+        }
+        else if(strcmp(typeStr, "logout") == 0)
+        {
+            /* 退出登录 */
+            /* 消除没用的请求类型*/
+            json_object_object_del(jobj, "type");
+            userLogout(client_fd, jobj, mysql);
         }
         else if(strcmp(typeStr, "private") == 0)
         {
@@ -352,9 +373,12 @@ static int userRegister(int client_fd, json_object *json,  MYSQL *mysql)
             }
             else
             {
+                /* 注册成功 */
                 printf("sql: %s\n", sql);
                 json_object_object_add(returnJson, "receipt", json_object_new_string("success"));
                 json_object_object_add(returnJson, "name", json_object_new_string(name));
+                /* 记录登录状态 */
+                updateUserStatus(name, client_fd, mysql);
             }
         }
     }
@@ -422,6 +446,7 @@ static int userLogin(int client_fd, json_object *json,  MYSQL *mysql)
                 json_object_object_add(returnJson, "name", json_object_new_string(name));
                 getUserInfo(name, returnJson, mysql);
                 /* 记录登录状态 */
+                updateUserStatus(name, client_fd, mysql);
             }
             else
             {
@@ -492,7 +517,7 @@ static int getUserInfo(const char *name, json_object *json,  MYSQL *mysql)
         res = NULL;
     }
     /* 查群组列表 */
-    sprintf(sql, "select group_name from group_members where groupMainName='%s'", name);
+    sprintf(sql, "select group_name from group_members where member_name='%s'", name);
     sql_ret = sqlQuery(sql, mysql, &res);
     if (sql_ret != 0)
     {
@@ -501,12 +526,10 @@ static int getUserInfo(const char *name, json_object *json,  MYSQL *mysql)
     }
     num_rows = mysql_num_rows(res);     // 行数
     i = 0;
-    json_object *groups = json_object_new_array();
+    json_object *groups = json_object_new_object();
     while ((row = mysql_fetch_row(res)))
     {
-        json_object *group = json_object_new_object();
-        json_object_object_add(group, "name", json_object_new_string(row[1]));
-        json_object_array_add(groups, group);
+        json_object_object_add(groups, row[0], json_object_new_int(atoi(row[1])));
         i++;
         if (i == num_rows)
         {
@@ -557,6 +580,34 @@ static int updateUserStatus(const char *name, int status, MYSQL *mysql)
         printf("sql query error:%s\n", mysql_error(mysql));
         return DATABASE_ERROR;
     }
+    /* 处理数据库查询结果 */
+    int num_rows = mysql_num_rows(res);     // 行数
+    if (num_rows > 0)
+    {
+        /* 更新数据库 */
+        sprintf(sql, "update online_users set client_fd=%d where name='%s'", status, name);
+        /* todo... */
+        /* 同时在线冲突 */
+    }
+    else
+    {
+        /* 插入数据库 */
+        sprintf(sql, "insert into online_users(name, client_fd) values('%s', %d)", name, status);
+    }
+    sql_ret = mysql_query(mysql, sql);
+    if (sql_ret != 0)
+    {
+        printf("sql insert error:%s\n", mysql_error(mysql));
+        return DATABASE_ERROR;
+    }
+    printf("sql: %s\n", sql);
+    /* 释放结果集 */
+    if (res != NULL)
+    {
+        mysql_free_result(res);
+        res = NULL;
+    }
+    return SUCCESS;
 
 }
 
@@ -564,4 +615,40 @@ static int updateUserStatus(const char *name, int status, MYSQL *mysql)
 static int privateChat(int client_fd, json_object *json,  MYSQL *mysql)
 {
 
+}
+
+/* 退出登录 */
+static int userLogout(int client_fd, json_object *json,  MYSQL *mysql)
+{
+    char sql[MAX_SQL_LEN] = {0};
+    MYSQL_RES *res = NULL;
+    /* 查询数据库 */
+    sprintf(sql, "select * from online_users where client_fd=%d", client_fd);
+    printf("sql: %s\n", sql);
+    int sql_ret = sqlQuery(sql, mysql, &res);
+    if (sql_ret != 0)
+    {
+        printf("sql query error:%s\n", mysql_error(mysql));
+        return DATABASE_ERROR;
+    }
+    /* 处理数据库查询结果 */
+    int num_rows = mysql_num_rows(res);     // 行数
+    if (num_rows > 0)
+    {
+        /* 更新数据库 */
+        sprintf(sql, "delete from online_users where client_fd=%d", client_fd);
+        sql_ret = mysql_query(mysql, sql);
+        if (sql_ret != 0)
+        {
+            printf("sql insert error:%s\n", mysql_error(mysql));
+            return DATABASE_ERROR;
+        }
+    }
+    /* 释放结果集 */
+    if (res != NULL)
+    {
+        mysql_free_result(res);
+        res = NULL;
+    }
+    return SUCCESS;
 }

@@ -47,22 +47,18 @@ enum STATUS_CODE
 /* 静态声明 */
 /* 登录成功的主界面 */
 static int ChatRoomMain(int fd, json_object *json);
+/* 退出登录 */
+static int ChatRoomLogout(int fd, const char *username);
 
 /* 发送json到服务器 */
 static int SendJsonToServer(int fd, const char *json)
 {
     int ret = 0;
     int len = strlen(json);
-    int sendLen = 0;
-    while (sendLen < len)
+    ret = send(fd, json, len, 0);
+    if (ret < 0)
     {
-        ret = send(fd, json + sendLen, len - sendLen, 0);
-        if (ret < 0)
-        {
-            perror("send error");
-            return ret;
-        }
-        sendLen += ret;
+        perror("send error");
     }
     return SUCCESS;
 }
@@ -498,31 +494,103 @@ int ChatRoomRecvMsg(int sockfd, json_object *friends)
 /* 发起群聊 */
 int ChatRoomAddGroupChat(int sockfd, const char *name);
 
+/* 打印群组 */
+static int ChatRoomPrintGroups(json_object *groups)
+{
+    printf("群组列表:\n");
+    int jsonLen = json_object_object_length(groups);
+
+    if(jsonLen == 0)
+    {
+        printf("暂无群组\n");
+        return ILLEGAL_ACCESS;
+    }
+    else
+    {
+        json_object_object_foreach(groups, key, value)
+        {
+            const char *name = key;
+            const int messages_num = json_object_get_int(value);
+            if(messages_num > 0)
+            {
+                printf("%s(%d)\n", name, messages_num);
+            }
+            else
+            {
+                printf("%s\n", name);
+            }
+        }
+        
+    }
+    return SUCCESS;
+}
 /* 显示群聊列表 */
 int ChatRoomShowGroupChat(int sockfd, json_object *groups, const char *username)
 {
     while(1)
     {
 
-        printf("群组列表:\n");
-        if(json_object_array_length(groups) == 0)
+        if(ChatRoomPrintGroups(groups) != SUCCESS)
         {
-            printf("暂无群组\n");
             return SUCCESS;
         }
-        else
+        printf("a.加入群组\nb.退出群组\nc.群聊\nd.退出\n其他.返回上一级");
+        char ch;
+        char name[NAME_SIZE] = {0};
+        while ((ch = getchar()) == '\n');   // 读取一个非换行的字符
+        while ((getchar()) != '\n');        // 吸收多余的字符
+        switch (ch)
         {
-            json_object_object_foreach(groups, key, value)
+            case 'a':
             {
-                if(value != 0)
-                {
-                    printf("\t%s*\n", key);
-                }
-                else
-                {
-                    printf("\t[%s]\n", key);
-                }
+                printf("请输入要加入的群组:");
+                scanf("%s", name);
+                ChatRoomAddFriend(sockfd, name, groups, username);
+                memset(name, 0, NAME_SIZE);
+                break;
             }
+            case 'b':
+            {
+                printf("请输入要退出的群组:");
+                scanf("%s", name);
+                ChatRoomDelFriend(sockfd, name, groups, username);
+                memset(name, 0, NAME_SIZE);
+                break;
+            }
+            case 'c':
+            {
+                /* todo...*/
+
+                // printf("请输入要私聊的好友:");
+                // scanf("%s", name);
+                // /* 判断是否存在好友 */
+                // if(json_object_object_get(groups, name) == NULL)
+                // {
+                //     printf("好友不存在\n");
+                //     break;
+                // }
+                // /* 创建私聊的本地聊天记录文件 */
+                // char privateChatRecord[PATH_SIZE] = {0};
+                // JoinPath(privateChatRecord, path, name);
+                // /* 创建文件 */
+                // FILE *fp = fopen(privateChatRecord, "a+");
+                // if(fp == NULL)
+                // {
+                //     printf("创建文件失败\n");
+                //     break;
+                // }
+                // fclose(fp);
+                // ChatRoomPrivateChat(sockfd, name, groups,username,privateChatRecord);
+                // memset(name, 0, NAME_SIZE);
+                break;
+            }
+            case 'd':
+            {
+                /* todo... */
+                break;
+            }
+            default:
+                return SUCCESS;
         }
     }
 }
@@ -583,6 +651,7 @@ static int ChatRoomMain(int fd, json_object *json)
                 break;
             case 'e':
                 printf("退出登录\n");
+                ChatRoomLogout(fd, username);
                 return SUCCESS;
                 break;
             default:
@@ -590,5 +659,16 @@ static int ChatRoomMain(int fd, json_object *json)
         }
     }
 
+    return SUCCESS;
+}
+
+/* 退出登录 */
+static int ChatRoomLogout(int fd, const char *username)
+{
+    json_object *jobj = json_object_new_object();
+    json_object_object_add(jobj, "type", json_object_new_string("logout"));
+    json_object_object_add(jobj, "name", json_object_new_string(username));
+    const char *json = json_object_to_json_string(jobj);
+    SendJsonToServer(fd, json);
     return SUCCESS;
 }
