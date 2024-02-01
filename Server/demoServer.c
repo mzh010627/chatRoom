@@ -26,6 +26,7 @@
 #define CONTENT_SIZE 1024       // 信息内容长度
 #define PATH_SIZE 256           // 文件路径长度
 #define MAX_SQL_LEN 1024        // sql语句长度
+#define TIME_LEN 20             // 时间长度
 #define MAX_LISENT_NUM 128      // 最大监听数
 #define MAX_BUFFER_SIZE 1024    // 最大缓冲区大小
 #define MIN_POLL_NUM 2          // 最小线程池数量
@@ -675,7 +676,6 @@ static int privateChat(int client_fd, json_object *json,  MYSQL *mysql)
             printf("friend_fd: %d\n", friend_fd);
             json_object_object_add(forwardJson, "type", json_object_new_string("private"));
             json_object_object_add(forwardJson, "name", json_object_new_string(name));
-            json_object_object_add(forwardJson, "friendName", json_object_new_string(friendName));
             json_object_object_add(forwardJson, "message", json_object_new_string(message));
             json_object_object_add(forwardJson, "time", json_object_new_string(getCurrentTime()));
             const char *forwardJsonStr = json_object_to_json_string(forwardJson);
@@ -696,7 +696,9 @@ static int privateChat(int client_fd, json_object *json,  MYSQL *mysql)
         else if (num_rows == 0)
         {
             /* 对方未在线 */
-            sprintf(sql, "insert into messages(sender_name, receiver_name, message, send_time) values('%s', '%s', '%s', '%s')", name, friendName, message, getCurrentTime());
+            /* 好友列表里对应的好友关系的消息数+1 */
+            sprintf(sql, "insert into messages(sender_name, receiver_name, message, send_time) values('%s', '%s', '%s', '%s'); update friends set messages_num=messages_num+1 where name='%s' and friend_name='%s';",
+             name, friendName, message, getCurrentTime(), name, friendName);
             sql_ret = mysql_query(mysql, sql);
             if (sql_ret != 0)
             {
@@ -765,7 +767,7 @@ static char *getCurrentTime()
 {
     time_t now;
     struct tm *tm;
-    static char time_str[20] = {0};
+    static char time_str[TIME_LEN] = {0};
     time(&now);
     tm = localtime(&now);
     strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", tm);
