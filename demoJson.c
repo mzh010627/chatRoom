@@ -21,6 +21,16 @@ int main(int argc, char *argv[])
     json_object_object_add(jobj, "adder", json_object_new_string(adder));
     const char *str = json_object_to_json_string(jobj);
 
+    /* 确认键“sex”是否存在 */
+    if (json_object_object_get(jobj, "sex") == NULL)
+    {
+        printf("no sex\n");
+    }
+    else
+    {
+        printf("yes sex\n");
+    }
+
     printf("%s\n", str);
     char *str2 = "{ \"name\": \"lisi\", \"ages\": 25, \"adder\": \"jiangsuhengnanjingshi\" }";
 
