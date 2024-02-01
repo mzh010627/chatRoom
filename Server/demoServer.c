@@ -47,6 +47,10 @@ enum STATUS_CODE
 
 };
 
+//socket初始化
+static int inet_init(int *sockfd);
+//数据库初始化和建立表
+static int mysql_Table_Init(MYSQL **recvSQL);
 /* 接收请求并分类/处理请求 */
 static int handleRequest(int client_fd, MYSQL *mysql);
 /* 用户注册 */
@@ -58,7 +62,8 @@ static int sqlQuery(const char *sql, MYSQL *mysql, MYSQL_RES **res);
 /* 获取用户的群组和好友列表 */
 static int getUserInfo(const char *name, json_object *json,  MYSQL *mysql);
 
-int main(int argc, char *argv[])
+//socket初始化
+static int inet_init(int *sockfd)
 {
     /* 初始化服务 */ 
     int server_fd = socket(AF_INET, SOCK_STREAM, 0);
@@ -97,6 +102,13 @@ int main(int argc, char *argv[])
     }
     printf("server start success\n");
 
+    *sockfd = server_fd;
+    return SUCCESS;
+}
+
+//数据库初始化和建立表
+static int mysql_Table_Init(MYSQL **recvSQL)
+{
     /* 初始化数据库 */
     MYSQL *mysql = mysql_init(NULL);
     if (mysql == NULL)
@@ -154,6 +166,27 @@ int main(int argc, char *argv[])
         perror("create table error");
         return DATABASE_ERROR;
     }
+    *recvSQL = mysql;
+    return SUCCESS;
+}
+
+int main(int argc, char *argv[])
+{
+    int server_fd;
+    int retser = inet_init(&server_fd);
+    if(retser == CONNECT_ERROR)
+    {
+        printf("init error\n");
+    }
+    printf("inet_init success\n");
+  
+    MYSQL *mysql;
+    int retsql = mysql_Table_Init(&mysql);
+    if(retsql == DATABASE_ERROR)
+    {
+        printf("mysal_table_init error");
+    } 
+    // printf("mysql_Table_Init success\n");
 
     /* 启动服务 */
     while (1)
@@ -171,9 +204,11 @@ int main(int argc, char *argv[])
         }
         printf("client connect success\n");
 
+        #if 0
         /* 处理请求 */
         handleRequest(client_fd,mysql);
-        // break;
+        #else
+        #endif
     }
     close(server_fd);
     return 0;
@@ -182,6 +217,10 @@ int main(int argc, char *argv[])
 /* 处理请求 */
 static int handleRequest(int client_fd, MYSQL *mysql)
 {
+    /* 线程分离 */
+    pthread_detach(pthread_self());
+    pthread_t main_tid = pthread_self();
+    printf("Main Thread ID: %lu\n", main_tid);
     char recvJson[CONTENT_SIZE] = {0};
     while(1)
     {
@@ -194,8 +233,23 @@ static int handleRequest(int client_fd, MYSQL *mysql)
         }
         if(ret == 0)
         {
-            printf("client disconnect 用户下线....\n");
+            #if 1
+            char sql[MAX_SQL_LEN] = {0};
+            sprintf(sql, "select name from online_users where client_fd='%d'", client_fd);
+            printf("sql: %s\n", sql);
+            MYSQL_RES *res = NULL;
+            int sql_ret = sqlQuery(sql, mysql, &res);
+            if (sql_ret != 0)
+            {
+                printf("sql query error\n");
+            }
+            MYSQL_ROW row =  mysql_fetch_row(res);
+            char *useName = row[0];
+            #endif
+            
+            printf("%s下线....\n", useName);
             close(client_fd);
+            mysql_free_result(res);
             return SUCCESS;
         }
         printf("recv json: %s\n", recvJson);
@@ -241,10 +295,8 @@ static int handleRequest(int client_fd, MYSQL *mysql)
             printf("json type error\n");
             return JSON_ERROR;
         }
-
-
     }
-
+    pthread_exit(NULL);
 }
 
 /* 注册 */
