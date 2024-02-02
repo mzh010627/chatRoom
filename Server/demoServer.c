@@ -68,6 +68,8 @@ static int userRegister(int client_fd, json_object *json, MYSQL *mysql);
 static int userLogin(int client_fd, json_object *json,  MYSQL *mysql);
 /* 数据库查询 */
 static int sqlQuery(const char *sql, MYSQL *mysql, MYSQL_RES **res);
+/* 获取离线消息 */
+static int getOfflineMessages(const char *name, json_object *json, MYSQL *mysql);
 /* 获取用户的群组和好友列表 */
 static int getUserInfo(const char *name, json_object *json,  MYSQL *mysql);
 /* 更新用户在线状态 */
@@ -471,6 +473,7 @@ static int userLogin(int client_fd, json_object *json,  MYSQL *mysql)
                 json_object_object_add(returnJson, "receipt", json_object_new_string("success"));
                 json_object_object_add(returnJson, "name", json_object_new_string(name));
                 getUserInfo(name, returnJson, mysql);
+                getOfflineMessages(name, returnJson, mysql);
                 /* 记录登录状态 */
                 updateUserStatus(name, client_fd, mysql);
             }
@@ -505,6 +508,54 @@ static int userLogin(int client_fd, json_object *json,  MYSQL *mysql)
     {
         perror("send error");
         return SEND_ERROR;
+    }
+    return SUCCESS;
+}
+
+/* 获取离线消息 */
+static int getOfflineMessages(const char *name, json_object *json, MYSQL *mysql)
+{
+    /* 查询数据库 */
+    char sql[MAX_SQL_LEN] = {0};
+    sprintf(sql, "select sender_name, message, send_time from messages where receiver_name='%s'", name);
+    printf("sql: %s\n", sql);
+    MYSQL_RES *res = NULL;
+    if (sqlQuery(sql, mysql, &res) != 0)
+    {
+        printf("sql query error:%s\n", mysql_error(mysql));
+        return DATABASE_ERROR;
+    }
+    MYSQL_ROW row;
+    int num_rows = mysql_num_rows(res);     // 行数
+    int i = 0;
+    json_object *messages = json_object_new_array();
+    while ((row = mysql_fetch_row(res)))
+    {
+        json_object *message = json_object_new_object();
+        json_object_object_add(message, "sender_name", json_object_new_string(row[0]));
+        json_object_object_add(message, "message", json_object_new_string(row[1]));
+        json_object_object_add(message, "send_time", json_object_new_string(row[2]));
+        json_object_array_add(messages, message);
+        i++;
+        if (i == num_rows)
+        {
+            break;
+        }
+    }
+    json_object_object_add(json, "messages", messages);
+    /* 释放结果集 */
+    if (res != NULL)
+    {
+        mysql_free_result(res);
+        res = NULL;
+    }
+    /* 删除已读消息 */
+    sprintf(sql, "delete from messages where receiver_name='%s'", name);
+    printf("sql: %s\n", sql);
+    if (sqlQuery(sql, mysql, &res) != 0)
+    {
+        printf("sql query error:%s\n", mysql_error(mysql));
+        return DATABASE_ERROR;
     }
     return SUCCESS;
 }
