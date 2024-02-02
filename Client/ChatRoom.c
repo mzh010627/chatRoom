@@ -431,6 +431,12 @@ int ChatRoomShowFriends(int sockfd, json_object* friends, const char *username, 
             {
                 printf("请输入要删除的好友:");
                 scanf("%s", name);
+                /* 判断是否存在好友 */
+                if(json_object_object_get(friends, name) == NULL)
+                {
+                    printf("好友不存在\n");
+                    break;
+                }
                 ChatRoomDelFriend(sockfd, name, friends, username);
                 memset(name, 0, NAME_SIZE);
                 break;
@@ -467,7 +473,29 @@ int ChatRoomShowFriends(int sockfd, json_object* friends, const char *username, 
 /* 删除好友 */
 int ChatRoomDelFriend(int sockfd, const char *name, json_object *friends, const char *username)
 {
-    
+    /* 删除好友信息转化为json,发送给服务器 */
+    json_object *jobj = json_object_new_object();
+    json_object_object_add(jobj, "type", json_object_new_string("delfriend"));
+    json_object_object_add(jobj, "name", json_object_new_string(username));
+    json_object_object_add(jobj, "friend", json_object_new_string(name));
+    const char *json = json_object_to_json_string(jobj);
+    /* 发送json */
+    /*
+        发送给服务器的信息：
+            type:delfriend
+            name:自己的ID
+            friend:好友ID
+    */
+    SendJsonToServer(sockfd, json);
+
+    /* 释放jobj */
+    json_object_put(jobj);
+    jobj = NULL;
+    /* 将好友删除好友列表 */
+    json_object_object_del(friends, name);
+    /* 反馈 */
+    printf("好友删除成功\n");
+    return SUCCESS;
 }
 
 /* 私聊 */

@@ -84,6 +84,8 @@ static int userLogout(int client_fd, json_object *json,  MYSQL *mysql);
 static char *getCurrentTime();
 /* 添加好友 */
 static int addFriend(int client_fd, json_object *json, MYSQL *mysql);
+/* 删除好友 */
+static int delFriend(int client_fd, json_object *json, MYSQL *mysql);
 
 /* 主函数 */
 int main(int argc, char *argv[])
@@ -378,6 +380,13 @@ void *handleRequest(void* arg)
             /* 消除没用的请求类型*/
             json_object_object_del(jobj, "type");
             addFriend(client_fd, jobj, mysql);
+        }
+        else if(strcmp(typeStr, "delfriend")==0)
+        {
+            /* 删好友 */
+            /* 消除没用的请求类型*/
+            json_object_object_del(jobj, "type");
+            delFriend(client_fd, jobj, mysql);
         }
         else if(strcmp(typeStr, "group") == 0)
         {
@@ -772,9 +781,16 @@ static int privateChat(int client_fd, json_object *json,  MYSQL *mysql)
     const char *returnJsonStr = json_object_to_json_string(returnJson);
     printf("send json: %s\n", returnJsonStr);
     ret = send(client_fd, returnJsonStr, strlen(returnJsonStr), 0);
+    if(ret < 0)
+    {
+        perror("send");
+        return SEND_ERROR;
+    }
     /* 释放json */
     json_object_put(json);
     json_object_put(returnJson);
+    
+    return SUCCESS;
 
 }
 
@@ -963,6 +979,12 @@ static int addFriend(int client_fd, json_object *json, MYSQL *mysql)
             printf("sql: %s\n", sql);
             if (sqlQuery(sql, mysql, &res) != 0)
             {
+                /* 释放结果集 */
+                if (res != NULL)
+                {
+                    mysql_free_result(res);
+                    res = NULL;
+                }
                 return SUCCESS;
             }
             memset(sql, 0, sizeof(sql));
@@ -1010,9 +1032,79 @@ static int addFriend(int client_fd, json_object *json, MYSQL *mysql)
                     }
                 }
             }
-                        
         }
     }
+    /* 释放结果集 */
+    if (res != NULL)
+    {
+        mysql_free_result(res);
+        res = NULL;
+    }
+    /* 发送json */
+    const char *returnJsonStr = json_object_to_json_string(returnJson);
+    printf("send json: %s\n", returnJsonStr);
+    ret = send(client_fd, returnJsonStr, strlen(returnJsonStr), 0);
+    if(ret < 0)
+    {
+        perror("send");
+        return SEND_ERROR;
+    }
 
+    return SUCCESS;
+}
+
+/* 删除好友 */
+static int delFriend(int client_fd, json_object *json, MYSQL *mysql)
+{
+    /* 删除流程:
+        单向删除好友关系
+    */
+    printf("删除好友\n");
+    /* 返回用json */
+    json_object *returnJson = json_object_new_object();
+    /* 转发用json */
+    json_object *forwardJson = json_object_new_object();
+
+    /* 获取json中的内容 */
+    const char *name = json_object_get_string(json_object_object_get(json, "name"));
+    const char *friendName = json_object_get_string(json_object_object_get(json, "friend"));
+    printf("name: %s\n", name);
+    printf("friendName: %s\n", friendName);
+    /* 删除好友关系 */
+    char sql[MAX_SQL_LEN] = {0};
+    sprintf(sql, "delete from friends where name='%s' and friend_name='%s'", name, friendName);
+    printf("sql: %s\n", sql);
+    if (mysql_query(mysql, sql) != 0)
+    {
+        printf("sql insert error:%s\n", mysql_error(mysql));
+        json_object_object_add(returnJson, "receipt", json_object_new_string("fail"));
+        json_object_object_add(returnJson, "reason", json_object_new_string("数据库插入错误"));
+    }
+    else
+    {
+        /* 转发消息 */
+        char message[CONTENT_SIZE] = {0};
+        sprintf(message, "%s已删除您为好友", name);
+        sendMessage("SYSTEM", friendName, message, mysql, returnJson);
+        json_object_object_add(returnJson, "receipt", json_object_new_string("success"));
+        json_object_object_add(returnJson, "reason", json_object_new_string("删除成功"));
+    }
+    /* 释放结果集 */
+    MYSQL_RES *res = NULL;
+    if (res != NULL)
+    {
+        mysql_free_result(res);
+        res = NULL;
+    }
+    /* 发送json */
+    const char *returnJsonStr = json_object_to_json_string(returnJson);
+    printf("send json: %s\n", returnJsonStr);
+    if(send(client_fd, returnJsonStr, strlen(returnJsonStr), 0) < 0)
+    {
+        perror("send");
+        return SEND_ERROR;
+    }
+    return SUCCESS;
+        
 
 }
