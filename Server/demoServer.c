@@ -211,6 +211,13 @@ int main(int argc, char *argv[])
         printf("create after_message_insert trigger error:%s\n", mysql_error(mysql));
         return DATABASE_ERROR;
     }
+    /* 上线后清除未读消息数 */
+    sprintf(sql, "create trigger if not exists after_online_insert after insert on online_users for each row update friends set messages_num = 0 where name = new.name");
+    if(mysql_query(mysql, sql) != 0)
+    {
+        printf("create after_online_insert trigger error:%s\n", mysql_error(mysql));
+        return DATABASE_ERROR;
+    }
 
     }
 
