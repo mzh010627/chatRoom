@@ -493,7 +493,7 @@ int ChatRoomPrivateChat(int sockfd, const char *name, json_object *friends, cons
     tm = localtime(&now);
     strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", tm);
     /* 将消息写入文件 */
-    fprintf(fp, "[%s] %s:\n%s\n", time_str, name, message);
+    fprintf(fp, "[%s] %s:\n%s\n", time_str, username, message);
     
     /* 私聊信息转化为json，发送给服务器 */
     json_object *jobj = json_object_new_object();
