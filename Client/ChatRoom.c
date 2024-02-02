@@ -223,6 +223,8 @@ int ChatRoomRegister(int sockfd)
         printf("注册失败\n");
         json_object_put(jreceipt);
         json_object_put(jobj);
+        jreceipt = NULL;
+        jobj = NULL;
         return JSON_ERROR;
     }
 
@@ -231,6 +233,7 @@ int ChatRoomRegister(int sockfd)
     {
         printf("注册成功\n");
         json_object_put(jobj);
+        jobj = NULL;
         json_object_object_del(jreceipt, "receipt");    // 删除掉多余的回执数据
         /* 初始化好友列表和群组列表 */
         json_object *friends = json_object_new_array();
@@ -243,8 +246,10 @@ int ChatRoomRegister(int sockfd)
     {
         const char *reason = json_object_get_string(json_object_object_get(jreceipt,"reason"));
         printf("注册失败:%s\n",reason);
-        json_object_put(jobj);
         json_object_put(jreceipt);
+        json_object_put(jobj);
+        jreceipt = NULL;
+        jobj = NULL;
     }
 
     return SUCCESS;
@@ -295,6 +300,8 @@ int ChatRoomLogin(int sockfd)
         printf("登录失败\n");
         json_object_put(jreceipt);
         json_object_put(jobj);
+        jreceipt = NULL;
+        jobj = NULL;
         return JSON_ERROR;
     }
 
@@ -303,6 +310,7 @@ int ChatRoomLogin(int sockfd)
     {
         printf("登录成功\n");
         json_object_put(jobj);
+        jobj = NULL;
         json_object_object_del(jreceipt, "receipt");    // 删除掉多余的回执数据
         ChatRoomMain(sockfd,jreceipt);
     }
@@ -312,6 +320,8 @@ int ChatRoomLogin(int sockfd)
         printf("登录失败:%s\n",reason);
         json_object_put(jreceipt);
         json_object_put(jobj);
+        jreceipt = NULL;
+        jobj = NULL;
         return SUCCESS;
     }
     return SUCCESS;
@@ -338,6 +348,7 @@ int ChatRoomAddFriend(int sockfd, const char *name, json_object *friends, const 
 
     /* 释放jobj */
     json_object_put(jobj);
+    jobj = NULL;
     /* 将好友加入好友列表 */
     json_object_object_add(friends, name, json_object_new_int(0));
     /* 反馈 */
@@ -462,6 +473,8 @@ int ChatRoomDelFriend(int sockfd, const char *name, json_object *friends, const 
 int ChatRoomPrivateChat(int sockfd, const char *name, json_object *friends, const char *username, const char * path)
 {
     printf("path:%s\n",path);
+    /* 加锁 */
+    pthread_mutex_lock(&mutex);
     /* 打开私聊的本地聊天记录文件 */
     FILE *fp = fopen(path, "a+");
     if(fp == NULL)
@@ -477,6 +490,9 @@ int ChatRoomPrivateChat(int sockfd, const char *name, json_object *friends, cons
         printf("%s", line);
         memset(line, 0, sizeof(line));
     }
+    fclose(fp);
+    /* 解锁 */
+    pthread_mutex_unlock(&mutex);
 
         
 
@@ -502,8 +518,6 @@ int ChatRoomPrivateChat(int sockfd, const char *name, json_object *friends, cons
     /* 如果输入是空行，表示用户按下回车，退出私聊 */
     if (strcmp(message, "") == 0) 
     {
-        /* 释放fp */
-        fclose(fp);
         return SUCCESS;
     }
     
@@ -514,8 +528,21 @@ int ChatRoomPrivateChat(int sockfd, const char *name, json_object *friends, cons
     time(&now);
     tm = localtime(&now);
     strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", tm);
+    /* 加锁 */
+    pthread_mutex_lock(&mutex);
     /* 将消息写入文件 */
+    fp = fopen(path, "a+");
+    if(fp == NULL)
+    {
+        printf("打开文件失败\n");
+        return ILLEGAL_ACCESS;
+    }
     fprintf(fp, "[%s] %s:\n%s\n", username, time_str, message);
+    /* 释放fp */
+    fclose(fp);
+    /* 解锁 */
+    pthread_mutex_unlock(&mutex);
+
     
     /* 私聊信息转化为json，发送给服务器 */
     json_object *jobj = json_object_new_object();
@@ -534,8 +561,7 @@ int ChatRoomPrivateChat(int sockfd, const char *name, json_object *friends, cons
     SendJsonToServer(sockfd, json);
     /* 释放jobj */
     json_object_put(jobj);
-    /* 释放fp */
-    fclose(fp);
+    jobj = NULL;
     
 }
 
@@ -603,6 +629,8 @@ static void* ChatRoomRecvMsg(void* args)
                 /* 拼接路径 */
                 char privateChatRecordPath[PATH_SIZE] = {0};
                 JoinPath(privateChatRecordPath, path, name);
+                /* 加锁 */
+                pthread_mutex_lock(&mutex);
                 /* 打开私聊的本地聊天记录文件 */
                 FILE *fp = fopen(privateChatRecordPath, "a+");
                 if(fp == NULL)
@@ -613,6 +641,8 @@ static void* ChatRoomRecvMsg(void* args)
                 /* 写入聊天记录 */
                 fprintf(fp, "[%s] %s:\n%s\n", name, time, message);
                 fclose(fp);
+                /* 解锁 */
+                pthread_mutex_unlock(&mutex);
 
                 continue;
             }
