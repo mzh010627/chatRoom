@@ -483,7 +483,29 @@ int ChatRoomPrivateChat(int sockfd, const char *name, json_object *friends, cons
     char message[CONTENT_SIZE] = {0};
 
     printf("请输入要私聊的内容:");
-    scanf("%s", message);
+    /* 清空缓存区 */
+    while ((getchar()) != '\n');
+    /* 使用 fgets 读取整行输入 */
+    if (fgets(message, sizeof(message), stdin) == NULL) 
+    {
+        perror("fgets error");
+        exit(EXIT_FAILURE);
+    }
+
+    /* 去掉输入字符串末尾的换行符 */
+    size_t len = strlen(message);
+    if (len > 0 && message[len - 1] == '\n') 
+    {
+        message[len - 1] = '\0';
+    }
+
+    /* 如果输入是空行，表示用户按下回车，退出私聊 */
+    if (strcmp(message, "") == 0) 
+    {
+        /* 释放fp */
+        fclose(fp);
+        return SUCCESS;
+    }
     
     /* 获取时间 */
     time_t now;
