@@ -201,6 +201,15 @@ int main(int argc, char *argv[])
     }
     printf("create messages table success\n");
 
+    /* 添加触发器 */
+    /* 自动增加未读消息数 */
+    sprintf(sql, "create trigger if not exists after_message_insert after insert on messages for each row update friends set messages_num = messages_num + 1 where name = new.receiver_name and friend_name = new.sender_name");
+    if(mysql_query(mysql, sql) != 0)
+    {
+        printf("create after_message_insert trigger error:%s\n", mysql_error(mysql));
+        return DATABASE_ERROR;
+    }
+
     }
 
     /* 创建套接字 */
@@ -697,16 +706,17 @@ static int privateChat(int client_fd, json_object *json,  MYSQL *mysql)
         {
             /* 对方未在线 */
             /* 好友列表里对应的好友关系的消息数+1 */
-            sprintf(sql, "insert into messages(sender_name, receiver_name, message, send_time) values('%s', '%s', '%s', '%s'); update friends set messages_num=messages_num+1 where name='%s' and friend_name='%s';",
-             name, friendName, message, getCurrentTime(), name, friendName);
+            sprintf(sql, "insert into messages(sender_name, receiver_name, message, send_time) values('%s', '%s', '%s', '%s');",
+             name, friendName, message, getCurrentTime());
             sql_ret = mysql_query(mysql, sql);
+            printf("sql: %s\n", sql);
+            memset(sql, 0, sizeof(sql));
             if (sql_ret != 0)
             {
                 printf("sql insert error:%s\n", mysql_error(mysql));
                 json_object_object_add(returnJson, "receipt", json_object_new_string("fail"));
                 json_object_object_add(returnJson, "reason", json_object_new_string("数据库插入错误"));
             }
-            printf("sql: %s\n", sql);
             json_object_object_add(returnJson, "receipt", json_object_new_string("success"));
             json_object_object_add(returnJson, "reason", json_object_new_string("对方未在线"));
         }
