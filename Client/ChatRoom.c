@@ -48,6 +48,7 @@ typedef struct
 {
     int sockfd;
     char *path;
+    json_object *friends;
 } RecvArgs;
 
 /* 声明全局变量 */
@@ -494,6 +495,8 @@ int ChatRoomPrivateChat(int sockfd, const char *name, json_object *friends, cons
     /* 解锁 */
     pthread_mutex_unlock(&mutex);
 
+    /* 未读消息置零 */
+    json_object_object_add(friends, name, json_object_new_int(0));
         
 
     char message[CONTENT_SIZE] = {0};
@@ -571,6 +574,7 @@ static void* ChatRoomRecvMsg(void* args)
     RecvArgs *recvArgs = (RecvArgs*)args;
     int sockfd = recvArgs->sockfd;
     const char *path = recvArgs->path;
+    json_object *friends = recvArgs->friends;
     /*
         预期接收到的服务器信息：
             type:private/group
@@ -629,6 +633,9 @@ static void* ChatRoomRecvMsg(void* args)
                 /* 拼接路径 */
                 char privateChatRecordPath[PATH_SIZE] = {0};
                 JoinPath(privateChatRecordPath, path, name);
+                /* 未读消息数+1 */
+                const int unread = json_object_get_int(json_object_object_get(friends, name));
+                json_object_object_add(friends, name, json_object_new_int(unread + 1));
                 /* 加锁 */
                 pthread_mutex_lock(&mutex);
                 /* 打开私聊的本地聊天记录文件 */
@@ -885,6 +892,7 @@ static int ChatRoomMain(int fd, json_object *json)
     RecvArgs recvArgs;
     recvArgs.sockfd = fd;
     recvArgs.path = path;
+    recvArgs.friends = friends;
     pthread_create(&tid, NULL, ChatRoomRecvMsg, (void *)&recvArgs);
 
 
