@@ -29,8 +29,8 @@
 #define TIME_LEN 20             // 时间长度
 #define MAX_LISENT_NUM 128      // 最大监听数
 #define MAX_BUFFER_SIZE 1024    // 最大缓冲区大小
-#define MIN_POLL_NUM 2          // 最小线程池数量
-#define MAX_POLL_NUM 8          // 最大线程池数量
+#define MIN_POLL_NUM 5          // 最小线程池数量
+#define MAX_POLL_NUM 10          // 最大线程池数量
 #define MAX_QUEUE_NUM 50      // 最大队列数量
 
 /* 状态码 */
