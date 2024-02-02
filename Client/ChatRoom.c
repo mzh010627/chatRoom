@@ -870,7 +870,7 @@ static int ChatRoomMain(int fd, json_object *json)
                 continue;
             }
             /* 写入聊天记录 */
-            fprintf(fp, "[%s] %s:\n%s\n", username, time, messageStr);
+            fprintf(fp, "[%s] %s:\n%s\n", sender_name, time, messageStr);
             fclose(fp);
         }
     }

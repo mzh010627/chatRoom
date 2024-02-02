@@ -76,11 +76,16 @@ static int getUserInfo(const char *name, json_object *json,  MYSQL *mysql);
 static int updateUserStatus(const char *name, int status, MYSQL *mysql);
 /* 好友私聊 */
 static int privateChat(int client_fd, json_object *json,  MYSQL *mysql);
+/* 向好友发送消息 */
+static int sendMessage(const char *name, const char *friendName, const char *message , MYSQL *mysql, json_object *returnJson);
 /* 退出登录 */
 static int userLogout(int client_fd, json_object *json,  MYSQL *mysql);
 /* 获取当前时间 */
 static char *getCurrentTime();
+/* 添加好友 */
+static int addFriend(int client_fd, json_object *json, MYSQL *mysql);
 
+/* 主函数 */
 int main(int argc, char *argv[])
 {
     /* 初始化线程池 */
@@ -155,6 +160,7 @@ int main(int argc, char *argv[])
         printf("create users table error:%s\n", mysql_error(mysql));
         return DATABASE_ERROR;
     }
+    memset(sql, 0, sizeof(sql));
     printf("create users table success\n");
     /* 好友关系表 */
     sprintf(sql, "create table if not exists friends(id int primary key auto_increment, name varchar(%d), friend_name varchar(%d), messages_num int(2) not NULL)", NAME_SIZE,NAME_SIZE);
@@ -165,6 +171,7 @@ int main(int argc, char *argv[])
         printf("create friends table error:%s\n", mysql_error(mysql));
         return DATABASE_ERROR;
     }
+    memset(sql, 0, sizeof(sql));
     printf("create friends table success\n");
     /* 群组表 */
     sprintf(sql, "create table if not exists chatgroups(id int primary key auto_increment, groupMainName varchar(%d), group_name varchar(%d))", NAME_SIZE, NAME_SIZE);  // groups 这个表名不能用
@@ -175,6 +182,7 @@ int main(int argc, char *argv[])
         printf("create chatgroups table error:%s\n", mysql_error(mysql));
         return DATABASE_ERROR;
     }
+    memset(sql, 0, sizeof(sql));
     printf("create groups table success\n");
     /* 群组成员表 */
     sprintf(sql, "create table if not exists group_members(id int primary key auto_increment, group_name varchar(%d), member_name varchar(%d), messages_num int(2) not NULL)", NAME_SIZE, NAME_SIZE);
@@ -184,6 +192,8 @@ int main(int argc, char *argv[])
         printf("create group_members table error:%s\n", mysql_error(mysql));
         return DATABASE_ERROR;
     }
+    memset(sql, 0, sizeof(sql));
+    printf("create group_members table success\n");
     /* 在线用户表 */
     sprintf(sql, "create table if not exists online_users(name varchar(%d), client_fd int primary key)", NAME_SIZE);
     sql_ret = mysql_query(mysql, sql);
@@ -192,6 +202,7 @@ int main(int argc, char *argv[])
         printf("create online_users table error:%s\n", mysql_error(mysql));
         return DATABASE_ERROR;
     }
+    memset(sql, 0, sizeof(sql));
     printf("create online_users table success\n");
     /* 消息表 */
     sprintf(sql, "create table if not exists messages(id int primary key auto_increment, sender_name varchar(%d), receiver_name varchar(%d), message varchar(%d), send_time datetime)", NAME_SIZE, NAME_SIZE, CONTENT_SIZE);
@@ -201,6 +212,7 @@ int main(int argc, char *argv[])
         printf("create messages table error:%s\n", mysql_error(mysql));
         return DATABASE_ERROR;
     }
+    memset(sql, 0, sizeof(sql));
     printf("create messages table success\n");
 
     /* 添加触发器 */
@@ -211,6 +223,7 @@ int main(int argc, char *argv[])
         printf("create after_message_insert trigger error:%s\n", mysql_error(mysql));
         return DATABASE_ERROR;
     }
+    memset(sql, 0, sizeof(sql));
     /* 上线后清除未读消息数 */
     sprintf(sql, "create trigger if not exists after_online_insert after insert on online_users for each row update friends set messages_num = 0 where name = new.name");
     if(mysql_query(mysql, sql) != 0)
@@ -218,6 +231,15 @@ int main(int argc, char *argv[])
         printf("create after_online_insert trigger error:%s\n", mysql_error(mysql));
         return DATABASE_ERROR;
     }
+    memset(sql, 0, sizeof(sql));
+    /* 将系统(SYSTEM)添加为新注册账号的单向好友 */
+    sprintf(sql, "create trigger if not exists after_register_insert after insert on users for each row insert into friends(name, friend_name, messages_num) values(new.name, 'SYSTEM', 0)");
+    if(mysql_query(mysql, sql) != 0)
+    {
+        printf("create after_register_insert trigger error:%s\n", mysql_error(mysql));
+        return DATABASE_ERROR;
+    }
+    memset(sql, 0, sizeof(sql));
 
     }
 
@@ -349,6 +371,13 @@ void *handleRequest(void* arg)
             privateChat(client_fd, jobj, mysql);
             
 
+        }
+        else if(strcmp(typeStr, "addfriend")==0)
+        {
+            /* 加好友 */
+            /* 消除没用的请求类型*/
+            json_object_object_del(jobj, "type");
+            addFriend(client_fd, jobj, mysql);
         }
         else if(strcmp(typeStr, "group") == 0)
         {
@@ -701,8 +730,6 @@ static int privateChat(int client_fd, json_object *json,  MYSQL *mysql)
     printf("私聊\n");
     /* 返回用json */
     json_object *returnJson = json_object_new_object();
-    /* 转发用json */
-    json_object *forwardJson = json_object_new_object();
 
     int ret = 0;
 
@@ -714,11 +741,54 @@ static int privateChat(int client_fd, json_object *json,  MYSQL *mysql)
     printf("friendName: %s\n", friendName);
     printf("message: %s\n", message);
 
+    /* 判断是否为双向好友 */
+    char sql[MAX_SQL_LEN] = {0};
+    sprintf(sql, "select * from friends where name='%s' and friend_name='%s'", friendName, name);
+    printf("sql: %s\n", sql);
+    MYSQL_RES *res = NULL;
+    if (sqlQuery(sql, mysql, &res) != 0)
+    {
+        printf("sql query error:%s\n", mysql_error(mysql));
+        json_object_object_add(returnJson, "receipt", json_object_new_string("fail"));
+        json_object_object_add(returnJson, "reason", json_object_new_string("数据库查询错误"));
+    }
+    memset(sql, 0, sizeof(sql));
+    int num_rows = mysql_num_rows(res);     // 行数
+    if (num_rows == 0)
+    {
+        /* 不是双向好友 */
+        json_object_object_add(returnJson, "type", json_object_new_string("private"));
+        json_object_object_add(returnJson, "name", json_object_new_string(friendName));
+        json_object_object_add(returnJson, "message", json_object_new_string("还未与对方成为好友,无法私聊"));
+        json_object_object_add(returnJson, "time",json_object_new_string(getCurrentTime()));
+    }
+    else
+    {
+        /* 向好友发送消息 */
+        ret = sendMessage(name, friendName, message, mysql, returnJson);
+    }
+
+    /* 发送json */
+    const char *returnJsonStr = json_object_to_json_string(returnJson);
+    printf("send json: %s\n", returnJsonStr);
+    ret = send(client_fd, returnJsonStr, strlen(returnJsonStr), 0);
+    /* 释放json */
+    json_object_put(json);
+    json_object_put(returnJson);
+
+}
+
+/* 向好友发送消息 */
+static int sendMessage(const char *name, const char *friendName, const char *message , MYSQL *mysql, json_object *returnJson)
+{
+    int ret = 0;
+    
+    /* 转发用json */
+    json_object *forwardJson = json_object_new_object();
     /* 查询数据库 */
     char sql[MAX_SQL_LEN] = {0};
     sprintf(sql, "select client_fd from online_users where name='%s'", friendName);
     printf("sql: %s\n", sql);
-    int friend_fd = client_fd;
     MYSQL_RES *res = NULL;
     int sql_ret = sqlQuery(sql, mysql, &res);
     memset(sql, 0, sizeof(sql));
@@ -739,7 +809,7 @@ static int privateChat(int client_fd, json_object *json,  MYSQL *mysql)
         {
             /* 发送消息 */
             MYSQL_ROW row = mysql_fetch_row(res);
-            friend_fd = atoi(row[0]);
+            int friend_fd = atoi(row[0]);
             printf("friend_fd: %d\n", friend_fd);
             json_object_object_add(forwardJson, "type", json_object_new_string("private"));
             json_object_object_add(forwardJson, "name", json_object_new_string(name));
@@ -779,21 +849,16 @@ static int privateChat(int client_fd, json_object *json,  MYSQL *mysql)
             json_object_object_add(returnJson, "reason", json_object_new_string("对方未在线"));
         }
     }
-    /* 发送json */
-    const char *returnJsonStr = json_object_to_json_string(returnJson);
-    printf("send json: %s\n", returnJsonStr);
-    ret = send(friend_fd, returnJsonStr, strlen(returnJsonStr), 0);
-    /* 释放json */
-    json_object_put(json);
-    json_object_put(returnJson);
+    
     /* 释放结果集 */
     if (res != NULL)
     {
         mysql_free_result(res);
         res = NULL;
     }
-
+    return SUCCESS;
 }
+
 
 /* 退出登录 */
 static int userLogout(int client_fd, json_object *json,  MYSQL *mysql)
@@ -842,3 +907,112 @@ static char *getCurrentTime()
     return time_str;
 }
 
+/* 添加好友 */
+static int addFriend(int client_fd, json_object *json, MYSQL *mysql)
+{
+    /* 添加好友的流程(A加B为好友)：
+        A将申请发给系统
+        系统判断B是否存在
+            存在:
+                系统将申请转发给B
+                    send_name:系统
+                    receive_name:B
+                    message:A申请加为好友
+                系统回复A成功
+            不存在:
+                系统回复A失败,并提示B不存在
+        等待B回复
+            好友申请:即成功,创建双向好友
+            删除好友：即失败,向A发送失败说明
+
+    */
+    printf("添加好友\n");
+    /* 返回用json */
+    json_object *returnJson = json_object_new_object();
+    /* 转发用json */
+    json_object *forwardJson = json_object_new_object();
+    int ret = 0;
+    /* 获取json中的内容 */
+    const char *name = json_object_get_string(json_object_object_get(json, "name"));
+    const char *friendName = json_object_get_string(json_object_object_get(json, "friend"));
+    printf("name: %s\n", name);
+    printf("friendName: %s\n", friendName);
+    /* 查询数据库 */
+    char sql[MAX_SQL_LEN] = {0};
+    sprintf(sql, "select * from users where name='%s'", friendName);
+    printf("sql: %s\n", sql);
+    MYSQL_RES *res = NULL;
+    if (sqlQuery(sql, mysql, &res) != 0)
+    {
+        printf("sql query error:%s\n", mysql_error(mysql));
+        json_object_object_add(returnJson, "receipt", json_object_new_string("fail"));
+        json_object_object_add(returnJson, "reason", json_object_new_string("数据库查询错误"));
+    }
+    else
+    {
+        /* 处理数据库查询结果 */
+        int num_rows = mysql_num_rows(res);     // 行数
+        printf("num_rows: %d\n", num_rows);
+        if (num_rows > 0)
+        {
+            /* 存在用户 */
+            /* 添加单向好友关系 */
+            memset(sql, 0, sizeof(sql));
+            /* 判断单向好友关系是否存在 */
+            sprintf(sql, "select * from friends where name='%s' and friend_name='%s'", name, friendName);
+            printf("sql: %s\n", sql);
+            if (sqlQuery(sql, mysql, &res) != 0)
+            {
+                return SUCCESS;
+            }
+            memset(sql, 0, sizeof(sql));
+            sprintf(sql, "insert into friends(name, friend_name, messages_num) values('%s', '%s', 0)", name, friendName);
+            printf("sql: %s\n", sql);
+            if (mysql_query(mysql, sql) != 0)
+            {
+                printf("sql insert error:%s\n", mysql_error(mysql));
+                json_object_object_add(returnJson, "receipt", json_object_new_string("fail"));
+                json_object_object_add(returnJson, "reason", json_object_new_string("数据库插入错误"));
+            }
+            else
+            {
+                /* 判断是否构成双向好友 */
+                /* 查询数据库 */
+                memset(sql, 0, sizeof(sql));
+                sprintf(sql, "select * from friends where name='%s' and friend_name='%s'", friendName, name);
+                printf("sql: %s\n", sql);
+                if (sqlQuery(sql, mysql, &res) != 0)
+                {
+                    printf("sql query error:%s\n", mysql_error(mysql));
+                    json_object_object_add(returnJson, "receipt", json_object_new_string("fail"));
+                    json_object_object_add(returnJson, "reason", json_object_new_string("数据库查询错误"));
+                }
+                else
+                {
+                    /* 处理数据库查询结果 */
+                    int num_rows = mysql_num_rows(res);     // 行数
+                    printf("num_rows: %d\n", num_rows);
+                    if (num_rows > 0)
+                    {
+                        /* 构成双向好友 */
+                        json_object_object_add(returnJson, "receipt", json_object_new_string("success"));
+                        json_object_object_add(returnJson, "reason", json_object_new_string("添加成功"));
+                    }
+                    else
+                    {
+                        /* 不构成双向好友 */
+                        /* 转发消息 */
+                        char message[CONTENT_SIZE] = {0};
+                        sprintf(message, "%s申请加为好友", name);
+                        sendMessage("SYSTEM", friendName, message, mysql, returnJson);
+                        json_object_object_add(returnJson, "receipt", json_object_new_string("success"));
+                        json_object_object_add(returnJson, "reason", json_object_new_string("已发出申请"));
+                    }
+                }
+            }
+                        
+        }
+    }
+
+
+}
