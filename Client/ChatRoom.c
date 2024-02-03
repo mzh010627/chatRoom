@@ -237,10 +237,6 @@ int ChatRoomRegister(int sockfd)
         jobj = NULL;
         json_object_object_del(jreceipt, "receipt");    // 删除掉多余的回执数据
         /* 初始化好友列表和群组列表 */
-        json_object *friends = json_object_new_array();
-        json_object *groups = json_object_new_array();
-        json_object_object_add(jreceipt, "friends", friends);
-        json_object_object_add(jreceipt, "groups", groups);
         ChatRoomMain(sockfd,jreceipt);  
     }
     else

@@ -458,6 +458,13 @@ static int userRegister(int client_fd, json_object *json,  MYSQL *mysql)
                 printf("sql: %s\n", sql);
                 json_object_object_add(returnJson, "receipt", json_object_new_string("success"));
                 json_object_object_add(returnJson, "name", json_object_new_string(name));
+                json_object * friends = json_object_new_object();
+                json_object_object_add(friends, "SYSTEM", json_object_new_int(0));
+                json_object_object_add(returnJson, "friends",friends);
+                json_object * groups = json_object_new_object();
+                json_object_object_add(returnJson, "groups", groups);
+                json_object * messages = json_object_new_array();
+                json_object_object_add(returnJson, "messages", messages);
                 /* 记录登录状态 */
                 updateUserStatus(name, client_fd, mysql);
             }
