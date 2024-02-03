@@ -242,6 +242,14 @@ int main(int argc, char *argv[])
         return DATABASE_ERROR;
     }
     memset(sql, 0, sizeof(sql));
+    /* 建群时默认把群主加到群成员表 */
+    sprintf(sql, "create trigger if not exists after_groupMain_insert after insert on chatgroups for each row insert into group_members(group_name, member_name, messages_num) values(new.group_name, new.groupMainName, 0)");
+    if(mysql_query(mysql, sql) != 0)
+    {
+        printf("create after_group_insert trigger error:%s\n", mysql_error(mysql));
+        return DATABASE_ERROR;
+    }
+    memset(sql, 0, sizeof(sql));
 
     }
 
