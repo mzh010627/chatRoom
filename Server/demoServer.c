@@ -86,6 +86,12 @@ static char *getCurrentTime();
 static int addFriend(int client_fd, json_object *json, MYSQL *mysql);
 /* 删除好友 */
 static int delFriend(int client_fd, json_object *json, MYSQL *mysql);
+/* 群聊 */
+static int groupChat(int client_fd, json_object *json, MYSQL *mysql);
+/* 发送消息给群成员 */
+static int sendMessageToGroup(const char *sendName, const char *groupName, const char *memberName, const char *message, MYSQL *mysql, json_object *returnJson);
+/* 创建群组 */
+static int createGroupChat(int client_fd, json_object *json, MYSQL *mysql);
 
 /* 主函数 */
 int main(int argc, char *argv[])
@@ -216,6 +222,15 @@ int main(int argc, char *argv[])
     }
     memset(sql, 0, sizeof(sql));
     printf("create messages table success\n");
+    /* 群消息表 */
+    sprintf(sql, "create table if not exists group_messages(id int primary key auto_increment, group_name varchar(%d), sender_name varchar(%d), receiver_name varchar(%d), message varchar(%d), send_time datetime)", NAME_SIZE, NAME_SIZE, NAME_SIZE, CONTENT_SIZE);
+    if (mysql_query(mysql, sql) != 0)
+    {
+        printf("create group_messages table error:%s\n", mysql_error(mysql));
+        return DATABASE_ERROR;
+    }
+    memset(sql, 0, sizeof(sql));
+    printf("create group_messages table success\n");
 
     /* 添加触发器 */
     /* 自动增加未读消息数 */
@@ -250,6 +265,23 @@ int main(int argc, char *argv[])
         return DATABASE_ERROR;
     }
     memset(sql, 0, sizeof(sql));
+    /* 群消息未读时增加群成员对应的消息数 */
+    sprintf(sql, "create trigger if not exists after_group_message_insert after insert on group_messages for each row update group_members set messages_num = messages_num + 1 where group_name = new.group_name and member_name = new.receiver_name");
+    if(mysql_query(mysql, sql) != 0)
+    {
+        printf("create after_group_message_insert trigger error:%s\n", mysql_error(mysql));
+        return DATABASE_ERROR;
+    }
+    memset(sql, 0, sizeof(sql));
+    /* 上线后清除群未读消息数 */
+    sprintf(sql, "create trigger if not exists after_online_group_insert after insert on online_users for each row update group_members set messages_num = 0 where group_name = new.name");
+    if(mysql_query(mysql, sql) != 0)
+    {
+        printf("create after_online_group_insert trigger error:%s\n", mysql_error(mysql));
+        return DATABASE_ERROR;
+    }
+    memset(sql, 0, sizeof(sql));
+    
 
     }
 
@@ -293,13 +325,18 @@ int main(int argc, char *argv[])
 void *handleRequest(void* arg)
 {
     /* 线程分离 */
-    pthread_detach(pthread_self());
+    if (pthread_detach(pthread_self()) != 0)
+    {
+        perror("pthread_detach error");
+        return NULL;
+    }
     printf("handleRequest start\n");
     int client_fd = ((TaskArgs*)arg)->client_fd;
     MYSQL *mysql =  ((TaskArgs*)arg)->mysql;
     char recvJson[CONTENT_SIZE] = {0};
     while(1)
     {
+        memset(recvJson, 0, sizeof(recvJson));
         /* 接收json字符串 */
         int ret = recv(client_fd, recvJson, CONTENT_SIZE, 0);
         if (ret == -1)
@@ -379,8 +416,6 @@ void *handleRequest(void* arg)
             /* 消除没用的请求类型*/
             json_object_object_del(jobj, "type");
             privateChat(client_fd, jobj, mysql);
-            
-
         }
         else if(strcmp(typeStr, "addfriend")==0)
         {
@@ -396,15 +431,30 @@ void *handleRequest(void* arg)
             json_object_object_del(jobj, "type");
             delFriend(client_fd, jobj, mysql);
         }
-        else if(strcmp(typeStr, "group") == 0)
+        else if(strcmp(typeStr, "groupchat") == 0)
         {
-            /* 其他 */
-            printf("json type error\n");
-            return NULL;
+            /* 群聊 */
+            /* 消除没用的请求类型*/
+            json_object_object_del(jobj, "type");
+            groupChat(client_fd, jobj, mysql);
         }
+        else if(strcmp(typeStr, "createGroupChat") == 0)
+        {
+            /* 创建群聊 */
+            /* 消除没用的请求类型*/
+            json_object_object_del(jobj, "type");
+            createGroupChat(client_fd, jobj, mysql);
+        }
+        else
+        {
+            /* 无效类型 */
+            printf("invalid type\n");
+        }
+        // return NULL;
 
 
     }
+    return NULL;
 
 }
 
@@ -602,7 +652,7 @@ static int getOfflineMessages(const char *name, json_object *json, MYSQL *mysql)
             break;
         }
     }
-    json_object_object_add(json, "messages", messages);
+    json_object_object_add(json, "frinend_messages", messages);
     /* 释放结果集 */
     if (res != NULL)
     {
@@ -617,6 +667,7 @@ static int getOfflineMessages(const char *name, json_object *json, MYSQL *mysql)
         printf("sql query error:%s\n", mysql_error(mysql));
         return DATABASE_ERROR;
     }
+    /* 未读群消息 */
     return SUCCESS;
 }
 
@@ -654,7 +705,7 @@ static int getUserInfo(const char *name, json_object *json,  MYSQL *mysql)
         res = NULL;
     }
     /* 查群组列表 */
-    sprintf(sql, "select group_name from group_members where member_name='%s'", name);
+    sprintf(sql, "select group_name,messages_num from group_members where member_name='%s'", name);
     sql_ret = sqlQuery(sql, mysql, &res);
     if (sql_ret != 0)
     {
@@ -789,7 +840,7 @@ static int privateChat(int client_fd, json_object *json,  MYSQL *mysql)
     else
     {
         /* 向好友发送消息 */
-        ret = sendMessage(name, friendName, message, mysql, returnJson);
+        sendMessage(name, friendName, message, mysql, returnJson);
     }
 
     /* 发送json */
@@ -798,7 +849,7 @@ static int privateChat(int client_fd, json_object *json,  MYSQL *mysql)
     ret = send(client_fd, returnJsonStr, strlen(returnJsonStr), 0);
     if(ret < 0)
     {
-        perror("send");
+        perror("send error");
         return SEND_ERROR;
     }
     /* 释放json */
@@ -1061,7 +1112,7 @@ static int addFriend(int client_fd, json_object *json, MYSQL *mysql)
     ret = send(client_fd, returnJsonStr, strlen(returnJsonStr), 0);
     if(ret < 0)
     {
-        perror("send");
+        perror("send error");
         return SEND_ERROR;
     }
 
@@ -1116,10 +1167,230 @@ static int delFriend(int client_fd, json_object *json, MYSQL *mysql)
     printf("send json: %s\n", returnJsonStr);
     if(send(client_fd, returnJsonStr, strlen(returnJsonStr), 0) < 0)
     {
-        perror("send");
+        perror("send error");
         return SEND_ERROR;
     }
     return SUCCESS;
-        
-
 }
+
+/* 群聊 */
+static int groupChat(int client_fd, json_object *json, MYSQL *mysql)
+{
+    /*  接到的消息
+            name:发信人;
+            groupName:群名称;
+            message:消息内容;
+        获取群成员,向所有成员转发消息
+    */
+    printf("群聊\n");
+    /* 返回用json */
+    json_object *returnJson = json_object_new_object();
+
+    /* 获取json中的内容 */
+    const char *name = json_object_get_string(json_object_object_get(json, "name"));
+    const char *groupName = json_object_get_string(json_object_object_get(json, "groupName"));
+    const char *message = json_object_get_string(json_object_object_get(json, "message"));
+    printf("name: %s\n", name);
+    printf("groupName: %s\n", groupName);
+    printf("message: %s\n", message);
+    /* 查询数据库 */
+    char sql[MAX_SQL_LEN] = {0};
+    sprintf(sql, "select member_name from group_members where group_name='%s' and member_name!='%s'", groupName,name);
+    printf("sql: %s\n", sql);
+    MYSQL_RES *res = NULL;
+    if (sqlQuery(sql, mysql, &res) != 0)
+    {
+        printf("sql query error:%s\n", mysql_error(mysql));
+        json_object_object_add(returnJson, "receipt", json_object_new_string("fail"));
+        json_object_object_add(returnJson, "reason", json_object_new_string("数据库查询错误"));
+    }
+    memset(sql, 0, sizeof(sql));
+    int num_rows = mysql_num_rows(res);     // 行数
+    printf("num_rows: %d\n", num_rows);
+    if (num_rows > 0)
+    {
+        /* 群成员存在 */
+        /* 转发消息 */
+        MYSQL_ROW row = NULL;
+        char memberName[NAME_SIZE] = {0};
+        while ((row = mysql_fetch_row(res)))
+        {
+            strcpy(memberName, row[0]);
+            printf("memberName: %s\n", memberName);
+            /* 转发消息 */
+            sendMessageToGroup(name, groupName, memberName, message, mysql, returnJson);
+        }
+    }
+    else
+    {
+        /* 群成员不存在 */
+        json_object_object_add(returnJson, "receipt", json_object_new_string("fail"));
+        json_object_object_add(returnJson, "reason", json_object_new_string("群成员不存在"));
+    }
+
+    /* 释放结果集 */
+    if (res != NULL)
+    {
+        mysql_free_result(res);
+        res = NULL;
+    }
+    /* 发送回执 */
+    const char *returnJsonStr = json_object_to_json_string(returnJson);
+    printf("send json: %s\n", returnJsonStr);
+    if(send(client_fd, returnJsonStr, strlen(returnJsonStr), 0) < 0)
+    {
+        perror("send error");
+        return SEND_ERROR;
+    }
+    return SUCCESS;
+}
+
+/* 发送消息给群成员 */
+static int sendMessageToGroup(const char *sendName, const char *groupName, const char *memberName, const char *message, MYSQL *mysql, json_object *returnJson)
+{
+    /* 转发用json */
+    json_object *forwardJson = json_object_new_object();
+    /* 查询数据库 */
+    char sql[MAX_SQL_LEN] = {0};
+    sprintf(sql, "select client_fd from online_users where name='%s'", memberName);
+    printf("sql: %s\n", sql);
+    MYSQL_RES *res = NULL;
+    int sql_ret = sqlQuery(sql, mysql, &res);
+    memset(sql, 0, sizeof(sql));
+    if (sql_ret != 0)
+    {
+        printf("sql query error:%s\n", mysql_error(mysql));
+        json_object_object_add(returnJson, "receipt", json_object_new_string("fail"));
+        json_object_object_add(returnJson, "reason", json_object_new_string("数据库查询错误"));
+    }
+    else
+    {
+        /* 处理数据库查询结果 */
+        int num_rows = mysql_num_rows(res);     // 行数
+        printf("num_rows: %d\n", num_rows);
+        if (num_rows > 0)
+        {
+            /* 成员在线 */
+            /* 转发消息 */
+            MYSQL_ROW row = mysql_fetch_row(res);
+            int member_fd = atoi(row[0]);
+            printf("client_fd: %d\n", member_fd);
+            json_object_object_add(forwardJson, "type", json_object_new_string("groupchat"));
+            json_object_object_add(forwardJson, "name", json_object_new_string(sendName));
+            json_object_object_add(forwardJson, "message", json_object_new_string(message));
+            json_object_object_add(forwardJson, "groupName", json_object_new_string(groupName));
+            json_object_object_add(forwardJson, "time", json_object_new_string(getCurrentTime()));
+            const char *forwardJsonStr = json_object_to_json_string(forwardJson);
+            printf("send json: %s\n", forwardJsonStr);
+            if(send(member_fd, forwardJsonStr, strlen(forwardJsonStr), 0) == -1)
+            {
+                perror("send error");
+                json_object_object_add(returnJson, "receipt", json_object_new_string("fail"));
+                json_object_object_add(returnJson, "reason", json_object_new_string("发送失败"));
+            }
+            else
+            {
+                json_object_object_add(returnJson, "receipt", json_object_new_string("success"));
+            }
+        }
+        else
+        {
+            /* 成员不在线 */
+            /* 更新数据库 */
+            sprintf(sql, "insert into group_messages(group_name, sender_name, receiver_name, message, send_time) values('%s', '%s', '%s', '%s', '%s')",
+                    groupName, sendName, memberName, message, getCurrentTime());
+            printf("sql: %s\n", sql);
+            if (mysql_query(mysql, sql) != 0)
+            {
+                printf("sql update error:%s\n", mysql_error(mysql));
+                json_object_object_add(returnJson, "receipt", json_object_new_string("fail"));
+                json_object_object_add(returnJson, "reason", json_object_new_string("数据库更新错误"));
+            }
+            else
+            {
+                json_object_object_add(returnJson, "receipt", json_object_new_string("success"));
+                json_object_object_add(returnJson, "reason", json_object_new_string("对方未在线"));
+            }
+        }
+        
+    }
+
+    /* 释放结果集 */
+    if (res != NULL)
+    {
+        mysql_free_result(res);
+        res = NULL;
+    }
+    return SUCCESS;
+}
+
+/* 创建群组 */
+static int createGroupChat(int client_fd, json_object *json, MYSQL *mysql)
+{
+    printf("创建群组\n");
+    /* 获取创建信息 */
+    const char *name = json_object_get_string(json_object_object_get(json, "name"));
+    const char *groupName = json_object_get_string(json_object_object_get(json, "groupName"));
+    printf("name: %s\n", name);
+    printf("groupName: %s\n", groupName);
+    /* 返回用json */
+    json_object *returnJson = json_object_new_object();
+    json_object_object_add(returnJson, "type", json_object_new_string("createGroupChat"));
+    /* 查询数据库 */
+    char sql[MAX_SQL_LEN] = {0};
+    sprintf(sql, "select * from chatgroups where group_name='%s'", groupName);
+    printf("sql: %s\n", sql);
+    MYSQL_RES *res = NULL;
+    if (sqlQuery(sql, mysql, &res) != 0)
+    {
+        printf("sql query error:%s\n", mysql_error(mysql));
+        json_object_object_add(returnJson, "receipt", json_object_new_string("fail"));
+        json_object_object_add(returnJson, "reason", json_object_new_string("数据库查询错误"));
+    }
+    else
+    {
+        memset(sql, 0, sizeof(sql));
+        int num_rows = mysql_num_rows(res);     // 行数
+        printf("num_rows: %d\n", num_rows);
+        if (num_rows > 0)
+        {
+            /* 群组存在 */
+            json_object_object_add(returnJson, "receipt", json_object_new_string("fail"));
+            json_object_object_add(returnJson, "reason", json_object_new_string("群组已存在"));
+        }
+        else
+        {
+            /* 群组不存在 */
+            /* 插入数据库 */
+            sprintf(sql, "insert into chatgroups(group_name, groupMainName) values('%s', '%s')", groupName, name);
+            printf("sql: %s\n", sql);
+            if (mysql_query(mysql, sql) != 0)
+            {
+                printf("sql insert error:%s\n", mysql_error(mysql));
+                json_object_object_add(returnJson, "receipt", json_object_new_string("fail"));
+                json_object_object_add(returnJson, "reason", json_object_new_string("数据库插入错误"));
+            }
+            else
+            {
+                /* 插入成功 */
+                json_object_object_add(returnJson, "receipt", json_object_new_string("success"));
+            }
+        }
+    }
+    /* 释放结果集 */
+    if (res != NULL)
+    {
+        mysql_free_result(res);
+        res = NULL;
+    }
+    /* 发送json */
+    const char *returnJsonStr = json_object_to_json_string(returnJson);
+    printf("send json: %s\n", returnJsonStr);
+    if(send(client_fd, returnJsonStr, strlen(returnJsonStr), 0) < 0)
+    {
+        perror("send error");
+        return SEND_ERROR;
+    }
+    return SUCCESS;
+}
+            

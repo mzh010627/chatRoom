@@ -27,13 +27,13 @@ int ChatRoomDelFriend(int sockfd, const char *name, json_object *friends, const 
 int ChatRoomPrivateChat(int sockfd, const char *name, json_object *friends, const char *username, const char * path);
 
 /* 发起群聊 */
-int ChatRoomAddGroupChat(int sockfd, const char *name);
+int ChatRoomAddGroupChat(int sockfd, const char *groupname, json_object *groups, const char *username);
 
 /* 显示群聊列表 */
-int ChatRoomShowGroupChat(int sockfd, json_object *groups, const char *username);
+int ChatRoomShowGroupChat(int sockfd, json_object *groups, const char *username, const char *path);
 
 /* 群聊 */
-int ChatRoomGroupChat(int sockfd, const char *name);
+int ChatRoomGroupChat(int sockfd, const char *name, json_object *groups, const char *username, const char *path);
 
 /* 退出群聊 */
 int ChatRoomExitGroupChat(int sockfd, const char *name);
