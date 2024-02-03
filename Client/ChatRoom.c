@@ -687,6 +687,42 @@ static void* ChatRoomRecvMsg(void* args)
                 }
                 continue;
             }
+            /* 退群回执 */
+            if (strcmp(type, "quitGroupChat") == 0)
+            {
+                json_object *receipt = json_object_object_get(jobj, "receipt");
+                if (receipt == NULL)
+                {
+                    printf("接收消息失败, 未接收到回执\n");
+                    continue;
+                }
+                if (strcmp(json_object_get_string(receipt), "success") == 0)
+                {
+                    /* 退群成功 */
+                    printf("退群成功\n");
+                    /* 获取群名 */
+                    json_object *groupName = json_object_object_get(jobj, "groupName");
+                    if (groupName == NULL)
+                    {
+                        printf("接收消息失败, 未接收到群名\n");
+                        continue;
+                    }
+                    json_object_object_del(groups, json_object_get_string(groupName));
+                }
+                else
+                {
+                    /* 退群失败 */
+                    json_object *reason = json_object_object_get(jobj, "reason");
+                    if (reason == NULL)
+                    {
+                        printf("接收消息失败, 未接收到失败原因\n");
+                        continue;
+                    }
+                    const char *reasonStr = json_object_get_string(reason);
+                    printf("退群失败, 失败原因:%s\n", reasonStr);
+                }
+                continue;
+            }
 
             /* 获取发送人 */
             json_object *nameJson = json_object_object_get(jobj, "name");
@@ -884,7 +920,7 @@ int ChatRoomShowGroupChat(int sockfd, json_object *groups, const char *username,
             {
                 printf("请输入要退出的群组:");
                 scanf("%s", name);
-                ChatRoomDelFriend(sockfd, name, groups, username);
+                ChatRoomExitGroupChat(sockfd, name, groups, username);
                 memset(name, 0, NAME_SIZE);
                 break;
             }
@@ -1046,7 +1082,37 @@ int ChatRoomJoinGroupChat(int sockfd, const char *groupname, json_object *groups
     
 
 /* 退出群聊 */
-int ChatRoomExitGroupChat(int sockfd, const char *name);
+int ChatRoomExitGroupChat(int sockfd, const char *groupname, json_object *groups, const char *username)
+{
+    /* 判断是否已加入群组 */
+    json_object *groupJson = json_object_object_get(groups, groupname);
+    if(groupJson == NULL)
+    {
+        printf("未加入该群组\n");
+        return ILLEGAL_ACCESS;
+    }
+    /* 创建json */
+    json_object *jobj = json_object_new_object();
+    json_object_object_add(jobj, "type", json_object_new_string("quitGroupChat"));
+    json_object_object_add(jobj, "name", json_object_new_string(username));
+    json_object_object_add(jobj, "groupName", json_object_new_string(groupname));
+    const char *json = json_object_to_json_string(jobj);
+    printf("json:%s\n", json);
+    /*
+        发送给服务器的信息：
+            type：quitGroupChat
+            name: 用户名
+            groupName：群名
+    */
+    if(SendJsonToServer(sockfd, json) != SUCCESS)
+    {
+        return JSON_ERROR;
+    }
+    /* 释放jobj */
+    json_object_put(jobj);
+    jobj = NULL;
+    return SUCCESS;
+}
 
 
 /* 登录成功的主界面 */
