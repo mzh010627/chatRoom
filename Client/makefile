@@ -3,7 +3,12 @@ client: ${src}
 	gcc ${src} -o client -ljson-c 
 
 g:${src}
-	gcc -g ${src} -o gtest
+	gcc -g ${src} -o gtest -ljson-c 
 
 clean:
-	@rm -rf	client
+	@rm -rf	client gtest
+
+var:
+	valgrind --leak-check=full ./client
+#valgrind --tool=memcheck ./client
+

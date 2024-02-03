@@ -343,6 +343,7 @@ int ChatRoomAddFriend(int sockfd, const char *name, json_object *friends, const 
 /* 打印好友列表 */
 static int ChatRoomPrintFriends(json_object *friends)
 {
+    // system("clear");
     printf("好友列表:\n");
     int jsonLen = json_object_object_length(friends);
     
@@ -350,6 +351,7 @@ static int ChatRoomPrintFriends(json_object *friends)
     {
         printf("暂无好友\n");
         return ILLEGAL_ACCESS;
+        sleep(3);
     }
     else
     {
@@ -393,7 +395,8 @@ int ChatRoomShowFriends(int sockfd, json_object* friends, const char *username, 
     {   
         if (ChatRoomPrintFriends(friends) != SUCCESS)
         {
-            return SUCCESS;
+            printf("==========\n");
+            // return SUCCESS;
         }
         printf("a.添加好友\nb.删除好友\nc.私聊\nd.退出\n其他.返回上一级");
         char ch;
@@ -450,6 +453,7 @@ int ChatRoomShowFriends(int sockfd, json_object* friends, const char *username, 
             }
             default:
                 return SUCCESS;
+
         }
     }
     return SUCCESS;
@@ -465,7 +469,7 @@ int ChatRoomDelFriend(int sockfd, const char *name, json_object *friends, const 
 int ChatRoomPrivateChat(int sockfd, const char *name, json_object *friends, const char *username, const char * path)
 {
     /* 打开私聊的本地聊天记录文件 */
-
+    
 
     char content[CONTENT_SIZE] = {0};
     while(1)
@@ -499,6 +503,8 @@ int ChatRoomRecvMsg(int sockfd, json_object *friends)
             content:消息内容
             time:发送时间
     */
+
+
 }
 
 /* 发起群聊 */
