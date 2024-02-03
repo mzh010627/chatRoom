@@ -274,7 +274,7 @@ int main(int argc, char *argv[])
     }
     memset(sql, 0, sizeof(sql));
     /* 上线后清除群未读消息数 */
-    sprintf(sql, "create trigger if not exists after_online_group_insert after insert on online_users for each row update group_members set messages_num = 0 where group_name = new.name");
+    sprintf(sql, "create trigger if not exists after_online_group_insert after insert on online_users for each row update group_members set messages_num = 0 where member_name = new.name");
     if(mysql_query(mysql, sql) != 0)
     {
         printf("create after_online_group_insert trigger error:%s\n", mysql_error(mysql));
@@ -635,24 +635,25 @@ static int getOfflineMessages(const char *name, json_object *json, MYSQL *mysql)
         printf("sql query error:%s\n", mysql_error(mysql));
         return DATABASE_ERROR;
     }
+    memset(sql, 0, sizeof(sql));
     MYSQL_ROW row;
     int num_rows = mysql_num_rows(res);     // 行数
-    int i = 0;
-    json_object *messages = json_object_new_array();
+    int idx = 0;
+    json_object *friend_messages = json_object_new_array();
     while ((row = mysql_fetch_row(res)))
     {
         json_object *message = json_object_new_object();
         json_object_object_add(message, "sender_name", json_object_new_string(row[0]));
         json_object_object_add(message, "message", json_object_new_string(row[1]));
         json_object_object_add(message, "send_time", json_object_new_string(row[2]));
-        json_object_array_add(messages, message);
-        i++;
-        if (i == num_rows)
+        json_object_array_add(friend_messages, message);
+        idx++;
+        if (idx == num_rows)
         {
             break;
         }
     }
-    json_object_object_add(json, "frinend_messages", messages);
+    json_object_object_add(json, "frinend_messages", friend_messages);
     /* 释放结果集 */
     if (res != NULL)
     {
@@ -662,12 +663,59 @@ static int getOfflineMessages(const char *name, json_object *json, MYSQL *mysql)
     /* 删除已读消息 */
     sprintf(sql, "delete from messages where receiver_name='%s'", name);
     printf("sql: %s\n", sql);
+    sqlQuery(sql, mysql, &res);
+    memset(sql, 0, sizeof(sql));
+    /* 释放结果集 */
+    if (res != NULL)
+    {
+        mysql_free_result(res);
+        res = NULL;
+    }
+    /* 未读群消息 */
+    sprintf(sql, "select sender_name,group_name, message, send_time from group_messages where receiver_name='%s'", name);
+    printf("sql: %s\n", sql);
     if (sqlQuery(sql, mysql, &res) != 0)
     {
         printf("sql query error:%s\n", mysql_error(mysql));
         return DATABASE_ERROR;
     }
-    /* 未读群消息 */
+    memset(sql, 0, sizeof(sql));
+    num_rows = mysql_num_rows(res);     // 行数
+    idx = 0;
+    json_object *group_messages = json_object_new_array();
+    while ((row = mysql_fetch_row(res)))
+    {
+        json_object *message = json_object_new_object();
+        json_object_object_add(message, "sender_name", json_object_new_string(row[0]));
+        json_object_object_add(message, "group_name", json_object_new_string(row[1]));
+        json_object_object_add(message, "message", json_object_new_string(row[2]));
+        json_object_object_add(message, "send_time", json_object_new_string(row[3]));
+        json_object_array_add(group_messages, message);
+        idx++;
+        if (idx == num_rows)
+        {
+            break;
+        }
+    }
+    json_object_object_add(json, "group_messages", group_messages);
+    /* 释放结果集 */
+    if (res != NULL)
+    {
+        mysql_free_result(res);
+        res = NULL;
+    }
+    /* 删除已读消息 */
+    sprintf(sql, "delete from group_messages where receiver_name='%s'", name);
+    printf("sql: %s\n", sql);
+    sqlQuery(sql, mysql, &res);
+
+    memset(sql, 0, sizeof(sql));
+    /* 释放结果集 */
+    if (res != NULL)
+    {
+        mysql_free_result(res);
+        res = NULL;
+    }
     return SUCCESS;
 }
 
@@ -1212,6 +1260,7 @@ static int groupChat(int client_fd, json_object *json, MYSQL *mysql)
         /* 群成员存在 */
         /* 转发消息 */
         MYSQL_ROW row = NULL;
+        int idx = 0;
         char memberName[NAME_SIZE] = {0};
         while ((row = mysql_fetch_row(res)))
         {
@@ -1219,6 +1268,10 @@ static int groupChat(int client_fd, json_object *json, MYSQL *mysql)
             printf("memberName: %s\n", memberName);
             /* 转发消息 */
             sendMessageToGroup(name, groupName, memberName, message, mysql, returnJson);
+            if(++idx >= num_rows)
+            {
+                break;
+            }
         }
     }
     else

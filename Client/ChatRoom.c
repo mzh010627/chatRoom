@@ -63,6 +63,8 @@ int g_recv_flag = 0;
 static int ChatRoomMain(int fd, json_object *json);
 /* 退出登录 */
 static int ChatRoomLogout(int fd, const char *username);
+/* 将未读消息写入本地文件 */
+static int ChatRoomSaveUnreadMsg(json_object *json, const char *path);
 
 /* 发送json到服务器 */
 static int SendJsonToServer(int fd, const char *json)
@@ -644,7 +646,7 @@ static void* ChatRoomRecvMsg(void* args)
                 }
                 continue;
             }
-            
+
             /* 获取发送人 */
             json_object *nameJson = json_object_object_get(jobj, "name");
             if (nameJson == NULL)
@@ -822,7 +824,7 @@ int ChatRoomShowGroupChat(int sockfd, json_object *groups, const char *username,
         {
             return SUCCESS;
         }
-        printf("a.加入群组\nb.退出群组\nc.群聊\nd.创建群聊\n其他.返回上一级");
+        printf("a.加入群组\nb.退出群组\nc.群聊\nd.创建群聊\n其他.返回上一级\n");
         char ch;
         char name[NAME_SIZE] = {0};
         while ((ch = getchar()) == '\n');   // 读取一个非换行的字符
@@ -1019,46 +1021,10 @@ static int ChatRoomMain(int fd, json_object *json)
             }
         ]
     */
-    json_object *messages = json_object_object_get(json, "messages");
-    if(messages != NULL)
-    {
-        int messages_num = json_object_array_length(messages);
-        for(int i = 0; i < messages_num; i++)
-        {
-            json_object *message = json_object_array_get_idx(messages, i);
-            /* 获取发送人 */
-            json_object *sender_nameJson = json_object_object_get(message, "sender_name");
-            /* 获取信息 */
-            json_object *messageJson = json_object_object_get(message, "message");
-            /* 获取时间 */
-            json_object *timeJson = json_object_object_get(message, "send_time");
-            if (sender_nameJson == NULL || messageJson == NULL || timeJson == NULL)
-            {
-                printf("接收消息失败, 接收到的消息不完整\n");
-                continue;
-            }
-            const char *sender_name = json_object_get_string(sender_nameJson);
-            const char *messageStr = json_object_get_string(messageJson);
-            const char *time = json_object_get_string(timeJson);
-            /* 保存消息 */
-            /* 拼接路径 */
-            char privateChatRecordPath[PATH_SIZE] = {0};
-            JoinPath(privateChatRecordPath, path, sender_name);
-            /* 打开私聊的本地聊天记录文件 */
-            FILE *fp = fopen(privateChatRecordPath, "a+");
-            if(fp == NULL)
-            {
-                printf("打开%s的文件失败\n",sender_name);
-                continue;
-            }
-            /* 写入聊天记录 */
-            fprintf(fp, "[%s] %s:\n%s\n", sender_name, time, messageStr);
-            fclose(fp);
-        }
-    }
-    /* todo...处理可能有的未读群聊 */
-
-
+    json_object *frinend_messages = json_object_object_get(json, "frinend_messages");
+    ChatRoomSaveUnreadMsg(frinend_messages, path);
+    json_object *group_messages = json_object_object_get(json, "group_messages");
+    ChatRoomSaveUnreadMsg(group_messages, path);
     
 
     /* 开启接收 */
@@ -1110,4 +1076,53 @@ static int ChatRoomLogout(int fd, const char *username)
     const char *json = json_object_to_json_string(jobj);
     SendJsonToServer(fd, json);
     return SUCCESS;
+}
+/* 将未读消息写入本地文件 */
+static int ChatRoomSaveUnreadMsg(json_object *json, const char *path)
+{
+    if(json != NULL)
+    {
+        int messages_num = json_object_array_length(json);
+        for(int i = 0; i < messages_num; i++)
+        {
+            json_object *message = json_object_array_get_idx(json, i);
+            /* 获取发送人 */
+            json_object *sender_nameJson = json_object_object_get(message, "sender_name");
+            /* 获取信息 */
+            json_object *messageJson = json_object_object_get(message, "message");
+            /* 获取时间 */
+            json_object *timeJson = json_object_object_get(message, "send_time");
+            if (sender_nameJson == NULL || messageJson == NULL || timeJson == NULL)
+            {
+                printf("接收消息失败, 接收到的消息不完整\n");
+                continue;
+            }
+            const char *sender_name = json_object_get_string(sender_nameJson);
+            const char *messageStr = json_object_get_string(messageJson);
+            const char *time = json_object_get_string(timeJson);
+            
+            char privateChatRecordPath[PATH_SIZE] = {0};
+            /* 可能存在的群名 */
+            json_object *groupNameJson = json_object_object_get(message, "group_name");
+            if(groupNameJson != NULL)
+            {
+                const char *groupName = json_object_get_string(groupNameJson);
+                JoinPath(privateChatRecordPath, path, groupName);
+            }
+            else
+            {                
+                JoinPath(privateChatRecordPath, path, sender_name);
+            }
+            /* 打开私聊的本地聊天记录文件 */
+            FILE *fp = fopen(privateChatRecordPath, "a+");
+            if(fp == NULL)
+            {
+                printf("打开%s的文件失败\n",sender_name);
+                continue;
+            }
+            /* 写入聊天记录 */
+            fprintf(fp, "[%s] %s:\n%s\n", sender_name, time, messageStr);
+            fclose(fp);
+        }
+    }
 }
