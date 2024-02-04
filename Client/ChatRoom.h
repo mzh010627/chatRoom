@@ -26,6 +26,9 @@ int ChatRoomDelFriend(int sockfd, const char *name, json_object *friends, const 
 /* 私聊 */
 int ChatRoomPrivateChat(int sockfd, const char *name, json_object *friends, const char *username, const char * path);
 
+/* 加入群聊 */
+int chatRoomAddFriend(int sockfd,  const char *name,  json_object *groups,  const char *username, const char *path);
+
 /* 发起群聊 */
 int ChatRoomAddGroupChat(int sockfd, const char *groupname, json_object *groups, const char *username);
 
@@ -36,7 +39,7 @@ int ChatRoomShowGroupChat(int sockfd, json_object *groups, const char *username,
 int ChatRoomGroupChat(int sockfd, const char *name, json_object *groups, const char *username, const char *path);
 
 /* 退出群聊 */
-int ChatRoomExitGroupChat(int sockfd, const char *name);
+int ChatRoomExitGroupChat(int sockfd, const char *groupname, const char *username);
 
 
 #endif // __CHAT_ROOM_H__

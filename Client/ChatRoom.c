@@ -762,6 +762,60 @@ static void* ChatRoomRecvMsg(void* args)
     return NULL;
 }
 
+/* 加入群聊 */
+int chatRoomAddFriend(int sockfd,  const char *name,  json_object *groups,  const char *username, const char *path)
+{
+    /* 判断群组是否存在 */
+    json_object *groupJson = json_object_object_get(groups, name);
+    if(groupJson == NULL)
+    {
+        printf("群组不存在\n");
+        return ILLEGAL_ACCESS;
+    }
+
+    char filePath[PATH_SIZE] = {0};
+    JoinPath(filePath, path, name);
+
+    /* 将用户名加入群聊的成员列表中 */
+    json_object *membersJson = json_object_object_get(groupJson, "members");
+    if (membersJson != NULL && json_object_is_type(membersJson, json_type_array)) 
+    {
+        int length = json_object_array_length(membersJson);
+        /* 检查是否已经存在相同的用户名 */
+        for (int idx = 0; idx < length; idx++) 
+        {
+            json_object *memberJson = json_object_array_get_idx(membersJson, idx);
+            const char *memberName = json_object_get_string(memberJson);
+            if (memberName != NULL && strcmp(memberName, username) == 0) 
+            {
+                /* 用户名已存在于群聊 */
+                return NULL_PTR;
+            }
+        }
+        /* 将新用户加入群聊的成员列表 */
+        json_object_array_add(membersJson, json_object_new_string(username));
+    } 
+    else 
+    {
+        /* 群聊成员列表不存在 */
+        return NULL_PTR;
+    }
+
+    /* 更新群聊信息到文件中 */ 
+    FILE *fp = fopen(filePath, "a+");
+    if (fp == NULL) 
+    {
+        /* 文件打开失败 */ 
+        return MALLOC_ERROR;
+    }
+    const char *groupStr = json_object_to_json_string(groups);
+    fprintf(fp, "%s", groupStr);
+    fclose(fp);
+
+    /* 在服务器端通知群聊成员有新用户加入 */ 
+
+    return SUCCESS;
+}
 /* 发起群聊 */
 int ChatRoomAddGroupChat(int sockfd, const char *groupname, json_object *groups, const char *username)
 {
@@ -970,8 +1024,33 @@ int ChatRoomGroupChat(int sockfd, const char *name, json_object *groups, const c
 
 }
 
+
 /* 退出群聊 */
-int ChatRoomExitGroupChat(int sockfd, const char *name);
+int ChatRoomExitGroupChat(int sockfd, const char *groupname, const char *username)
+{
+    /* 退出群聊信息转化为json,发送给服务器 */
+    json_object *jobj = json_object_new_object();
+    json_object_object_add(jobj, "type", json_object_new_string("exitGroupChat"));
+    json_object_object_add(jobj, "name", json_object_new_string(username));
+    json_object_object_add(jobj, "groupName", json_object_new_string(groupname));
+    const char *json = json_object_to_json_string(jobj);
+    printf("json:%s\n", json);
+    /*
+        发送给服务器的信息：
+            type：exitGroupChat
+            name: 用户名
+            groupName：群名
+    */
+    SendJsonToServer(sockfd, json);
+    /* 释放jobj */
+    json_object_put(jobj);
+    jobj = NULL;
+
+    /* 反馈 */
+    printf("退出群聊成功\n");
+    return SUCCESS;
+}
+
 
 
 /* 登录成功的主界面 */
