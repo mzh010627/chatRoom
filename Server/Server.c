@@ -494,6 +494,7 @@ static int getUserInfo(int acceptfd, json_object *json,  MYSQL *database)
         printf("sql query error:%s\n", mysql_error(database));
         return DATABASE_ERROR;
     }
+    
     MYSQL_ROW row;
     int num_rows = mysql_num_rows(res);     // 行数
     int idx = 0;

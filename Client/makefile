@@ -1,15 +1,14 @@
 TARGET = client
-OBJ = main.o ChatRoom.o
+OBJ = main.o Client.o
 
 $(TARGET):$(OBJ)
 	gcc $^ -o $@ -ljson-c
 
-g:*c
-	gcc -g $^ -o $@ -ljson-c
+
 main.o:main.c
 	gcc -c $^ -o $@ 
 
-ChatRoom.o:ChatRoom.c
+Client.o:Client.c
 	gcc -c $^ -o $@
 
 clean:
