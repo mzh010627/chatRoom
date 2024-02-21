@@ -1445,6 +1445,7 @@ static int createGroupChat(int client_fd, json_object *json, MYSQL *mysql)
             {
                 /* 插入成功 */
                 json_object_object_add(returnJson, "receipt", json_object_new_string("success"));
+                json_object_object_add(returnJson, "groupName", json_object_new_string(groupName));
             }
         }
     }
