@@ -65,11 +65,14 @@ static int ChatRoomMain(int fd, json_object *json);
 static int ChatRoomLogout(int fd, const char *username);
 /* 将未读消息写入本地文件 */
 static int ChatRoomSaveUnreadMsg(json_object *json, const char *path);
+/* 加入群聊 */
+int ChatRoomJoinGroupChat(int sockfd, const char *groupname, json_object *groups,const char *username);
+
 
 /* 发送json到服务器 */
 static int SendJsonToServer(int fd, const char *json)
 {
-    printf("开始发送json\n");
+    // printf("开始发送json\n");
     int ret = 0;
     int len = strlen(json);
     ret = send(fd, json, len, 0);
@@ -83,15 +86,15 @@ static int SendJsonToServer(int fd, const char *json)
 static int RecvJsonFromServer(int fd,  char *json)
 {
 
-    printf("开始接收json\n");
+    // printf("开始接收json\n");
     int ret = recv(fd, json, CONTENT_SIZE, 0);
     if (ret < 0)
     {
         perror("recv error");
         return ret;
     }
-    printf("json:%s\n",json);
-    printf("接收json成功\n");
+    // printf("json:%s\n",json);
+    // printf("接收json成功\n");
     return SUCCESS;
 }
 
@@ -366,7 +369,7 @@ static int ChatRoomPrintFriends(json_object *friends)
     if(jsonLen == 0)
     {
         printf("暂无好友\n");
-        return ILLEGAL_ACCESS;
+        return SUCCESS;
     }
     else
     {
@@ -398,7 +401,7 @@ int ChatRoomShowFriends(int sockfd, json_object* friends, const char *username, 
         {
             return SUCCESS;
         }
-        printf("a.添加好友\nb.删除好友\nc.私聊\nd.退出\n其他.返回上一级\n");
+        printf("a.添加好友\nb.删除好友\nc.私聊\n其他.返回上一级\n");
         char ch;
         char name[NAME_SIZE] = {0};
         while ((ch = getchar()) == '\n');   // 读取一个非换行的字符
@@ -444,11 +447,6 @@ int ChatRoomShowFriends(int sockfd, json_object* friends, const char *username, 
                 memset(name, 0, NAME_SIZE);
                 break;
             }
-            case 'd':
-            {
-                /* todo... */
-                break;
-            }
             default:
                 return SUCCESS;
         }
@@ -487,98 +485,103 @@ int ChatRoomDelFriend(int sockfd, const char *name, json_object *friends, const 
 /* 私聊 */
 int ChatRoomPrivateChat(int sockfd, const char *name, json_object *friends, const char *username, const char * path)
 {
-    printf("path:%s\n",path);
-    /* 加锁 */
-    pthread_mutex_lock(&mutex);
-    /* 打开私聊的本地聊天记录文件 */
-    FILE *fp = fopen(path, "a+");
-    if(fp == NULL)
+    char message[CONTENT_SIZE] = "\n";
+    while( strcmp(message, "") != 0)
     {
-        printf("打开文件失败\n");
-        return ILLEGAL_ACCESS;
-    }
-    /* 输出聊天记录 */
-    char line[CONTENT_SIZE] = {0};
-    printf("私聊记录:\n");
-    while(fgets(line,  CONTENT_SIZE, fp) != NULL)
-    {
-        printf("%s", line);
-        memset(line, 0, CONTENT_SIZE);
-    }
-    fclose(fp);
-    /* 解锁 */
-    pthread_mutex_unlock(&mutex);
+        printf("path:%s\n",path);
+        /* 加锁 */
+        pthread_mutex_lock(&mutex);
+        /* 打开私聊的本地聊天记录文件 */
+        FILE *fp = fopen(path, "a+");
+        if(fp == NULL)
+        {
+            printf("打开文件失败\n");
+            return ILLEGAL_ACCESS;
+        }
+        /* 输出聊天记录 */
+        char line[CONTENT_SIZE] = {0};
+        printf("私聊记录:\n");
+        while(fgets(line,  CONTENT_SIZE, fp) != NULL)
+        {
+            printf("%s", line);
+            memset(line, 0, CONTENT_SIZE);
+        }
+        fclose(fp);
+        /* 解锁 */
+        pthread_mutex_unlock(&mutex);
 
-    /* 未读消息置零 */
-    json_object_object_add(friends, name, json_object_new_int(0));
+        /* 未读消息置零 */
+        json_object_object_add(friends, name, json_object_new_int(0));
+            
+
+
+
+        printf("请输入要私聊的内容:\n");
+        /* 清空缓存区 */
+        int c;
+        while ((c = getchar()) != '\n' && c != EOF);
+        /* 使用 fgets 读取整行输入 */
+        if (fgets(message, sizeof(message), stdin) == NULL) 
+        {
+            perror("fgets error");
+            exit(EXIT_FAILURE);
+        }
+
+        /* 去掉输入字符串末尾的换行符 */
+        size_t len = strlen(message);
+        if (len > 0 && message[len - 1] == '\n') 
+        {
+            message[len - 1] = '\0';
+        }
+
+        // /* 如果输入是空行，表示用户按下回车，退出私聊 */
+        // if (strcmp(message, "") == 0) 
+        // {
+        //     return SUCCESS;
+        // }
         
+        /* 获取时间 */
+        time_t now;
+        struct tm *tm;
+        static char time_str[20] = {0};
+        time(&now);
+        tm = localtime(&now);
+        strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", tm);
+        /* 加锁 */
+        pthread_mutex_lock(&mutex);
+        /* 将消息写入文件 */
+        fp = fopen(path, "a+");
+        if(fp == NULL)
+        {
+            printf("打开文件失败\n");
+            return ILLEGAL_ACCESS;
+        }
+        fprintf(fp, "[%s] %s:\n%s\n", username, time_str, message);
+        /* 释放fp */
+        fclose(fp);
+        /* 解锁 */
+        pthread_mutex_unlock(&mutex);
 
-    char message[CONTENT_SIZE] = {0};
-
-    printf("请输入要私聊的内容:");
-    /* 清空缓存区 */
-    while ((getchar()) != '\n');
-    /* 使用 fgets 读取整行输入 */
-    if (fgets(message, sizeof(message), stdin) == NULL) 
-    {
-        perror("fgets error");
-        exit(EXIT_FAILURE);
+        
+        /* 私聊信息转化为json，发送给服务器 */
+        json_object *jobj = json_object_new_object();
+        json_object_object_add(jobj, "type", json_object_new_string("private"));
+        json_object_object_add(jobj, "name", json_object_new_string(username));
+        json_object_object_add(jobj, "friendName", json_object_new_string(name));
+        json_object_object_add(jobj, "message", json_object_new_string(message));
+        const char *json = json_object_to_json_string(jobj);
+        /*
+            发送给服务器的信息：
+                type：private
+                name: 用户名
+                friendName：好友名
+                message：私聊内容
+        */
+        SendJsonToServer(sockfd, json);
+        /* 释放jobj */
+        json_object_put(jobj);
+        jobj = NULL;
     }
-
-    /* 去掉输入字符串末尾的换行符 */
-    size_t len = strlen(message);
-    if (len > 0 && message[len - 1] == '\n') 
-    {
-        message[len - 1] = '\0';
-    }
-
-    /* 如果输入是空行，表示用户按下回车，退出私聊 */
-    if (strcmp(message, "") == 0) 
-    {
-        return SUCCESS;
-    }
-    
-    /* 获取时间 */
-    time_t now;
-    struct tm *tm;
-    static char time_str[20] = {0};
-    time(&now);
-    tm = localtime(&now);
-    strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", tm);
-    /* 加锁 */
-    pthread_mutex_lock(&mutex);
-    /* 将消息写入文件 */
-    fp = fopen(path, "a+");
-    if(fp == NULL)
-    {
-        printf("打开文件失败\n");
-        return ILLEGAL_ACCESS;
-    }
-    fprintf(fp, "[%s] %s:\n%s\n", username, time_str, message);
-    /* 释放fp */
-    fclose(fp);
-    /* 解锁 */
-    pthread_mutex_unlock(&mutex);
-
-    
-    /* 私聊信息转化为json，发送给服务器 */
-    json_object *jobj = json_object_new_object();
-    json_object_object_add(jobj, "type", json_object_new_string("private"));
-    json_object_object_add(jobj, "name", json_object_new_string(username));
-    json_object_object_add(jobj, "friendName", json_object_new_string(name));
-    json_object_object_add(jobj, "message", json_object_new_string(message));
-    const char *json = json_object_to_json_string(jobj);
-    /*
-        发送给服务器的信息：
-            type：private
-            name: 用户名
-            friendName：好友名
-            message：私聊内容
-    */
-    SendJsonToServer(sockfd, json);
-    /* 释放jobj */
-    json_object_put(jobj);
-    jobj = NULL;
     return SUCCESS;
     
 }
@@ -625,12 +628,22 @@ static void* ChatRoomRecvMsg(void* args)
                 if(receipt == NULL)
                 {
                     printf("接收消息失败, 未接收到回执\n");
+                    continue;
                 }
                 const char *receiptStr = json_object_get_string(receipt);
                 if(strcmp(receiptStr, "success") == 0)
                 {
                     /* 创群成功 */
                     printf("创群成功\n");
+                    /* 获取群名 */
+                    json_object *groupName = json_object_object_get(jobj, "groupName");
+                    if (groupName == NULL)
+                    {
+                        printf("接收消息失败, 未接收到群名\n");
+                        continue;
+                    }
+                    const char *groupNameStr = json_object_get_string(groupName);
+                    json_object_object_add(groups, groupNameStr, json_object_new_int(0));
                 }
                 else
                 {
@@ -643,6 +656,79 @@ static void* ChatRoomRecvMsg(void* args)
                     }
                     const char *reasonStr = json_object_get_string(reason);
                     printf("创群失败, 失败原因:%s\n", reasonStr);
+                }
+                continue;
+            }
+            /* 加群回执 */
+            if (strcmp(type, "joinGroupChat") == 0)
+            {
+                json_object *receipt = json_object_object_get(jobj, "receipt");
+                if (receipt == NULL)
+                {
+                    printf("接收消息失败, 未接收到回执\n");
+                    continue;
+                }
+                const char *receiptStr = json_object_get_string(receipt);
+                if (strcmp(receiptStr, "success") == 0)
+                {
+                    /* 加群成功 */
+                    printf("加群成功\n");
+                    /* 获取群名 */
+                    json_object *groupName = json_object_object_get(jobj, "groupName");
+                    if (groupName == NULL)
+                    {
+                        printf("接收消息失败, 未接收到群名\n");
+                        continue;
+                    }
+                    const char *groupNameStr = json_object_get_string(groupName);
+                    json_object_object_add(groups, groupNameStr, json_object_new_int(0));
+                }
+                else
+                {
+                    /* 加群失败 */
+                    json_object *reason = json_object_object_get(jobj, "reason");
+                    if (reason == NULL)
+                    {
+                        printf("接收消息失败, 未接收到失败原因\n");
+                        continue;
+                    }
+                    printf("加群失败, 失败原因:%s\n", json_object_get_string(reason));
+                }
+                continue;
+            }
+            /* 退群回执 */
+            if (strcmp(type, "quitGroupChat") == 0)
+            {
+                json_object *receipt = json_object_object_get(jobj, "receipt");
+                if (receipt == NULL)
+                {
+                    printf("接收消息失败, 未接收到回执\n");
+                    continue;
+                }
+                if (strcmp(json_object_get_string(receipt), "success") == 0)
+                {
+                    /* 退群成功 */
+                    printf("退群成功\n");
+                    /* 获取群名 */
+                    json_object *groupName = json_object_object_get(jobj, "groupName");
+                    if (groupName == NULL)
+                    {
+                        printf("接收消息失败, 未接收到群名\n");
+                        continue;
+                    }
+                    json_object_object_del(groups, json_object_get_string(groupName));
+                }
+                else
+                {
+                    /* 退群失败 */
+                    json_object *reason = json_object_object_get(jobj, "reason");
+                    if (reason == NULL)
+                    {
+                        printf("接收消息失败, 未接收到失败原因\n");
+                        continue;
+                    }
+                    const char *reasonStr = json_object_get_string(reason);
+                    printf("退群失败, 失败原因:%s\n", reasonStr);
                 }
                 continue;
             }
@@ -771,7 +857,7 @@ int ChatRoomAddGroupChat(int sockfd, const char *groupname, json_object *groups,
     json_object_object_add(jobj, "name", json_object_new_string(username));
     json_object_object_add(jobj, "groupName", json_object_new_string(groupname));
     const char *json = json_object_to_json_string(jobj);
-    printf("json:%s\n", json);
+    // printf("json:%s\n", json);
     /*
         发送给服务器的信息：
             type：createGroupChat
@@ -835,7 +921,7 @@ int ChatRoomShowGroupChat(int sockfd, json_object *groups, const char *username,
             {
                 printf("请输入要加入的群组:");
                 scanf("%s", name);
-                ChatRoomAddFriend(sockfd, name, groups, username);
+                ChatRoomJoinGroupChat(sockfd, name, groups, username);
                 memset(name, 0, NAME_SIZE);
                 break;
             }
@@ -843,7 +929,7 @@ int ChatRoomShowGroupChat(int sockfd, json_object *groups, const char *username,
             {
                 printf("请输入要退出的群组:");
                 scanf("%s", name);
-                ChatRoomDelFriend(sockfd, name, groups, username);
+                ChatRoomExitGroupChat(sockfd, name, groups, username);
                 memset(name, 0, NAME_SIZE);
                 break;
             }
@@ -970,8 +1056,72 @@ int ChatRoomGroupChat(int sockfd, const char *name, json_object *groups, const c
 
 }
 
+/* 加入群聊 */
+int ChatRoomJoinGroupChat(int sockfd, const char *groupname, json_object *groups,const char *username)
+{
+    /* 判断是否已加入群组 */
+    json_object *groupJson = json_object_object_get(groups, groupname);
+    if(groupJson != NULL)
+    {
+        printf("已加入该群组\n");
+        return ILLEGAL_ACCESS;
+    }
+    /* 创建json */
+    json_object *jobj = json_object_new_object();
+    json_object_object_add(jobj, "type", json_object_new_string("joinGroupChat"));
+    json_object_object_add(jobj, "name", json_object_new_string(username));
+    json_object_object_add(jobj, "groupName", json_object_new_string(groupname));
+    const char *json = json_object_to_json_string(jobj);
+    printf("json:%s\n", json);
+    /*
+        发送给服务器的信息：
+            type：joinGroupChat
+            name: 用户名
+            groupName：群名
+    */
+    if(SendJsonToServer(sockfd, json) != SUCCESS)
+    {
+        return JSON_ERROR;
+    }
+    /* 释放jobj */
+    json_object_put(jobj);
+    jobj = NULL;
+    return SUCCESS;
+}
+    
+
 /* 退出群聊 */
-int ChatRoomExitGroupChat(int sockfd, const char *name);
+int ChatRoomExitGroupChat(int sockfd, const char *groupname, json_object *groups, const char *username)
+{
+    /* 判断是否已加入群组 */
+    json_object *groupJson = json_object_object_get(groups, groupname);
+    if(groupJson == NULL)
+    {
+        printf("未加入该群组\n");
+        return ILLEGAL_ACCESS;
+    }
+    /* 创建json */
+    json_object *jobj = json_object_new_object();
+    json_object_object_add(jobj, "type", json_object_new_string("quitGroupChat"));
+    json_object_object_add(jobj, "name", json_object_new_string(username));
+    json_object_object_add(jobj, "groupName", json_object_new_string(groupname));
+    const char *json = json_object_to_json_string(jobj);
+    printf("json:%s\n", json);
+    /*
+        发送给服务器的信息：
+            type：quitGroupChat
+            name: 用户名
+            groupName：群名
+    */
+    if(SendJsonToServer(sockfd, json) != SUCCESS)
+    {
+        return JSON_ERROR;
+    }
+    /* 释放jobj */
+    json_object_put(jobj);
+    jobj = NULL;
+    return SUCCESS;
+}
 
 
 /* 登录成功的主界面 */
