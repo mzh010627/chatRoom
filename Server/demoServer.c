@@ -16,8 +16,8 @@
 #include <mysql/mysql.h>
 
 
-#define SERVER_PORT 8888        // 服务器端口号,暂定为8888
-#define SERVER_IP "172.16.157.11"   // 服务器ip,暂定为本机ip
+#define SERVER_PORT 8889        // 服务器端口号,暂定为8888
+#define SERVER_IP "172.26.5.98"   // 服务器ip,暂定为本机ip
 #define NAME_SIZE 10            // 用户名长度
 #define PASSWORD_SIZE 20        // 密码长度
 #define MAX_FRIEND_NUM 10       // 最大好友数量
@@ -151,7 +151,7 @@ int main(int argc, char *argv[])
 
     {
     /* 连接数据库 */
-    mysql_real_connect(mysql, "localhost", "root", "52671314", "test", 3306, NULL, 0);
+    mysql_real_connect(mysql, "localhost", "root", "12345678", "chat", 3306, NULL, 0);
     if (mysql == NULL)
     {
         printf("mysql_real_connect error:%s\n",mysql_error(mysql));
@@ -329,7 +329,9 @@ int main(int argc, char *argv[])
 void *handleRequest(void* arg)
 {
     /* 线程分离 */
-    if (pthread_detach(pthread_self()) != 0)
+    int temp = pthread_detach(pthread_self());
+    printf("temp:%d\n", temp);
+    if (temp != 0 && temp != 22)
     {
         perror("pthread_detach error");
         return NULL;
@@ -752,13 +754,13 @@ static int getUserInfo(const char *name, json_object *json,  MYSQL *mysql)
     }
     MYSQL_ROW row;
     int num_rows = mysql_num_rows(res);     // 行数
-    int i = 0;
+    int idx = 0;
     json_object *friends = json_object_new_object();
     while ((row = mysql_fetch_row(res)))
     {
         json_object_object_add(friends, row[0], json_object_new_int(atoi(row[1])));
-        i++;
-        if (i == num_rows)
+        idx++;
+        if (idx == num_rows)
         {
             break;
         }
@@ -779,13 +781,13 @@ static int getUserInfo(const char *name, json_object *json,  MYSQL *mysql)
         return DATABASE_ERROR;
     }
     num_rows = mysql_num_rows(res);     // 行数
-    i = 0;
+    idx = 0;
     json_object *groups = json_object_new_object();
     while ((row = mysql_fetch_row(res)))
     {
         json_object_object_add(groups, row[0], json_object_new_int(atoi(row[1])));
-        i++;
-        if (i == num_rows)
+        idx++;
+        if (idx == num_rows)
         {
             break;
         }

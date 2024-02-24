@@ -33,8 +33,8 @@ enum STATUS_CODE
 
 };
 
-#define SERVER_PORT 8888        // 服务器端口号,暂定为8888
-#define SERVER_IP "172.16.157.11"   // 服务器ip,暂定为本机ip
+#define SERVER_PORT 8889        // 服务器端口号,暂定为8888
+#define SERVER_IP "172.26.5.98"   // 服务器ip,暂定为本机ip
 #define NAME_SIZE 10            // 用户名长度
 #define PASSWORD_SIZE 20        // 密码长度
 #define MAX_FRIEND_NUM 10       // 最大好友数量
@@ -57,7 +57,8 @@ typedef struct
 pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 /* 接收标识 */
 int g_recv_flag = 0;
-
+/* 更新标识符 */
+int u_recv_flag = 0;
 /* 静态声明 */
 /* 登录成功的主界面 */
 static int ChatRoomMain(int fd, json_object *json);
@@ -65,8 +66,10 @@ static int ChatRoomMain(int fd, json_object *json);
 static int ChatRoomLogout(int fd, const char *username);
 /* 将未读消息写入本地文件 */
 static int ChatRoomSaveUnreadMsg(json_object *json, const char *path);
+/* 聊天记录更新 */
+static void* updateChatRecord(void* args);
 /* 加入群聊 */
-int ChatRoomJoinGroupChat(int sockfd, const char *groupname, json_object *groups,const char *username);
+int ChatRoomJoinGroupChat(int sockfd, const char *groupname, json_object *groups, const char *username);
 
 
 /* 发送json到服务器 */
@@ -486,29 +489,38 @@ int ChatRoomDelFriend(int sockfd, const char *name, json_object *friends, const 
 int ChatRoomPrivateChat(int sockfd, const char *name, json_object *friends, const char *username, const char * path)
 {
     char message[CONTENT_SIZE] = "\n";
+    /* 读取聊天记录函数 */
+    /* 开启接收 */
+    pthread_t tid;
+    u_recv_flag = 1;
+    RecvArgs recvArgs;
+    char tempPath[PATH_SIZE] = {0};
+    strcpy(tempPath,path);
+    recvArgs.path = tempPath;
+    pthread_create(&tid, NULL, updateChatRecord, (void *)&recvArgs);
     while( strcmp(message, "") != 0)
     {
         printf("path:%s\n",path);
-        /* 加锁 */
-        pthread_mutex_lock(&mutex);
-        /* 打开私聊的本地聊天记录文件 */
+        // /* 加锁 */
+        // pthread_mutex_lock(&mutex);
+        // /* 打开私聊的本地聊天记录文件 */
         FILE *fp = fopen(path, "a+");
         if(fp == NULL)
         {
             printf("打开文件失败\n");
             return ILLEGAL_ACCESS;
         }
-        /* 输出聊天记录 */
-        char line[CONTENT_SIZE] = {0};
-        printf("私聊记录:\n");
-        while(fgets(line,  CONTENT_SIZE, fp) != NULL)
-        {
-            printf("%s", line);
-            memset(line, 0, CONTENT_SIZE);
-        }
-        fclose(fp);
-        /* 解锁 */
-        pthread_mutex_unlock(&mutex);
+        // /* 输出聊天记录 */
+        // char line[CONTENT_SIZE] = {0};
+        // printf("私聊记录:\n");
+        // while(fgets(line,  CONTENT_SIZE, fp) != NULL)
+        // {
+        //     printf("%s", line);
+        //     memset(line, 0, CONTENT_SIZE);
+        // }
+        // fclose(fp);
+        // /* 解锁 */
+        // pthread_mutex_unlock(&mutex);
 
         /* 未读消息置零 */
         json_object_object_add(friends, name, json_object_new_int(0));
@@ -516,7 +528,7 @@ int ChatRoomPrivateChat(int sockfd, const char *name, json_object *friends, cons
 
 
 
-        printf("请输入要私聊的内容:\n");
+        
         /* 清空缓存区 */
         int c;
         while ((c = getchar()) != '\n' && c != EOF);
@@ -561,7 +573,6 @@ int ChatRoomPrivateChat(int sockfd, const char *name, json_object *friends, cons
         fclose(fp);
         /* 解锁 */
         pthread_mutex_unlock(&mutex);
-
         
         /* 私聊信息转化为json，发送给服务器 */
         json_object *jobj = json_object_new_object();
@@ -582,9 +593,64 @@ int ChatRoomPrivateChat(int sockfd, const char *name, json_object *friends, cons
         json_object_put(jobj);
         jobj = NULL;
     }
+    u_recv_flag = 0;
     return SUCCESS;
-    
 }
+
+/* 聊天记录更新 */
+static void* updateChatRecord(void* args)
+{
+    RecvArgs *recvArgs = (RecvArgs*)args;
+    const char *path = recvArgs->path;
+    long record_size = 0;
+    /*
+        预期接收到的服务器信息：
+            type:private/group
+            name:发信人
+            toname:收信人
+            message:消息内容
+            time:发送时间
+    */
+    /* 线程分离 */
+    pthread_detach(pthread_self());
+    while (u_recv_flag)
+    {
+        // printf("path:%s\n",path);
+        /* 加锁 */
+        pthread_mutex_lock(&mutex);
+        /* 打开私聊的本地聊天记录文件 */
+        FILE *fp = fopen(path, "a+");
+        if(fp == NULL)
+        {
+            printf("打开文件失败\n");
+            return NULL;
+        }
+        fseek(fp, 0, SEEK_END);
+        long file_size = ftell(fp);
+        fseek(fp,0,SEEK_SET);
+        if (file_size > record_size)
+        {
+            /* 输出聊天记录 */
+            char line[CONTENT_SIZE] = {0};
+            printf("私聊记录:\n");
+            while(fgets(line,  CONTENT_SIZE, fp) != NULL)
+            {
+                printf("%s", line);
+                memset(line, 0, CONTENT_SIZE);
+            }
+            fclose(fp);
+            record_size = file_size;
+            printf("请输入要私聊的内容:\n");
+        }
+        /* 解锁 */
+        pthread_mutex_unlock(&mutex);
+        sleep(1); 
+        
+    }
+    
+   
+}
+
 
 /* 接收消息 */
 static void* ChatRoomRecvMsg(void* args)
