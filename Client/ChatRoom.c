@@ -526,8 +526,6 @@ int ChatRoomPrivateChat(int sockfd, const char *name, json_object *friends, cons
         json_object_object_add(friends, name, json_object_new_int(0));
             
 
-
-
         
         /* 清空缓存区 */
         int c;
@@ -632,7 +630,7 @@ static void* updateChatRecord(void* args)
         {
             /* 输出聊天记录 */
             char line[CONTENT_SIZE] = {0};
-            printf("私聊记录:\n");
+            printf("聊天记录:\n");
             while(fgets(line,  CONTENT_SIZE, fp) != NULL)
             {
                 printf("%s", line);
@@ -640,7 +638,7 @@ static void* updateChatRecord(void* args)
             }
             fclose(fp);
             record_size = file_size;
-            printf("请输入要私聊的内容:\n");
+            printf("请输入要聊天的内容:\n");
         }
         /* 解锁 */
         pthread_mutex_unlock(&mutex);
@@ -1035,89 +1033,105 @@ int ChatRoomGroupChat(int sockfd, const char *name, json_object *groups, const c
     /* 拼接路径 */
     char groupChatRecordPath[PATH_SIZE] = {0};
     JoinPath(groupChatRecordPath, path, name);
-    /* 加锁 */
-    pthread_mutex_lock(&mutex);
-    /* 打开群聊的本地聊天记录文件 */
-    FILE *fp = fopen(groupChatRecordPath, "a+");
-    if(fp == NULL)
+    
+    char message[CONTENT_SIZE] = "\n";
+    /* 读取聊天记录函数 */
+    /* 开启接收 */
+    pthread_t tid;
+    u_recv_flag = 1;
+    RecvArgs recvArgs;
+    char tempPath[PATH_SIZE] = {0};
+    strcpy(tempPath,groupChatRecordPath);
+    recvArgs.path = tempPath;
+    pthread_create(&tid, NULL, updateChatRecord, (void *)&recvArgs);
+    while( strcmp(message, "") != 0)
     {
-        printf("打开文件失败\n");
-        return MALLOC_ERROR;
-    }
-    /* 输出群聊记录 */
-    char line[CONTENT_SIZE] = {0};
-    while(fgets(line, CONTENT_SIZE, fp) != NULL)
-    {
-        printf("%s", line);
-        memset(line, 0, CONTENT_SIZE);
-    }
-    fclose(fp);
-    /* 解锁 */
-    pthread_mutex_unlock(&mutex);
+        printf("path:%s\n",groupChatRecordPath);
+        // /* 加锁 */
+        // pthread_mutex_lock(&mutex);
+        // /* 打开私聊的本地聊天记录文件 */
+        FILE *fp = fopen(groupChatRecordPath, "a+");
+        if(fp == NULL)
+        {
+            printf("打开文件失败\n");
+            return ILLEGAL_ACCESS;
+        }
 
-    /* 未读消息置零 */
-    json_object_object_add(groups, name, json_object_new_int(0));
+        /* 未读消息置零 */
+        json_object_object_add(groups, name, json_object_new_int(0));
+            
 
-    char message[CONTENT_SIZE] = {0};
-    printf("请输入要发送的消息:");
-    /* 清空缓存区 */
-    while ((getchar()) != '\n');
-    /* 使用 fgets 读取整行输入 */
-    if (fgets(message, sizeof(message), stdin) == NULL) 
-    {
-        perror("fgets error");
-        exit(EXIT_FAILURE);
-    }
+        
+        /* 清空缓存区 */
+        int c;
+        while ((c = getchar()) != '\n' && c != EOF);
+        /* 使用 fgets 读取整行输入 */
+        if (fgets(message, sizeof(message), stdin) == NULL) 
+        {
+            perror("fgets error");
+            exit(EXIT_FAILURE);
+        }
 
-    /* 去掉输入字符串末尾的换行符 */
-    size_t len = strlen(message);
-    if (len > 0 && message[len - 1] == '\n') 
-    {
-        message[len - 1] = '\0';
-    }
+        /* 去掉输入字符串末尾的换行符 */
+        size_t len = strlen(message);
+        if (len > 0 && message[len - 1] == '\n') 
+        {
+            message[len - 1] = '\0';
+        }
 
-    /* 如果输入是空行，表示用户按下回车，退出私聊 */
-    if (strcmp(message, "") == 0) 
-    {
-        return SUCCESS;
+        // /* 如果输入是空行，表示用户按下回车，退出私聊 */
+        // if (strcmp(message, "") == 0) 
+        // {
+        //     return SUCCESS;
+        // }
+        
+        /* 获取时间 */
+        time_t now;
+        struct tm *tm;
+        static char time_str[20] = {0};
+        time(&now);
+        tm = localtime(&now);
+        strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", tm);
+        /* 加锁 */
+        pthread_mutex_lock(&mutex);
+        /* 将消息写入文件 */
+        fp = fopen(groupChatRecordPath, "a+");
+        if(fp == NULL)
+        {
+            printf("打开文件失败\n");
+            return ILLEGAL_ACCESS;
+        }
+        fprintf(fp, "[%s] %s:\n%s\n", username, time_str, message);
+        /* 释放fp */
+        fclose(fp);
+        /* 解锁 */
+        pthread_mutex_unlock(&mutex);
+        
+        /* 群聊信息转化为json，发送给服务器 */
+        json_object *jobj = json_object_new_object();
+        json_object_object_add(jobj, "type", json_object_new_string("groupchat"));
+        json_object_object_add(jobj, "name", json_object_new_string(username));
+        json_object_object_add(jobj, "groupName", json_object_new_string(name));
+        json_object_object_add(jobj, "message", json_object_new_string(message));
+        const char *json_str = json_object_to_json_string(jobj);
+        /*
+            发送给服务器的信息：
+                type：private
+                name: 用户名
+                friendName：好友名
+                message：群聊内容
+        */
+        if(json_str == NULL)
+        {
+            printf("json_object_to_json_string error\n");
+            return JSON_ERROR;
+        }
+        SendJsonToServer(sockfd, json_str);
+        /* 释放json */
+        json_object_put(jobj);
+        jobj = NULL;
     }
-    /* 获取时间 */
-    time_t now;
-    struct tm *tm;
-    static char time_str[20] = {0};
-    time(&now);
-    tm = localtime(&now);
-    strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", tm);
-    /* 加锁 */
-    pthread_mutex_lock(&mutex);
-    /* 将消息写入文件 */
-    fp = fopen(groupChatRecordPath, "a+");
-    if(fp == NULL)
-    {
-        printf("打开文件失败\n");
-        return ILLEGAL_ACCESS;
-    }
-    fprintf(fp, "[%s] %s:\n%s\n", username, time_str, message);
-    fclose(fp);
-    /* 解锁 */
-    pthread_mutex_unlock(&mutex);
-
-    /* 群聊信息转化为json,发送给服务器 */
-    json_object *jobj = json_object_new_object();
-    json_object_object_add(jobj, "type", json_object_new_string("groupchat"));
-    json_object_object_add(jobj, "name", json_object_new_string(username));
-    json_object_object_add(jobj, "groupName", json_object_new_string(name));
-    json_object_object_add(jobj, "message", json_object_new_string(message));
-    const char *json_str = json_object_to_json_string(jobj);
-    if(json_str == NULL)
-    {
-        printf("json_object_to_json_string error\n");
-        return JSON_ERROR;
-    }
-    SendJsonToServer(sockfd, json_str);
-    /* 释放json */
-    json_object_put(jobj);
-    jobj = NULL;
+    u_recv_flag = 0;
     return SUCCESS;
 
 }
