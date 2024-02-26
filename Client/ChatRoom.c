@@ -446,6 +446,9 @@ int ChatRoomShowFriends(int sockfd, json_object* friends, const char *username, 
                 /* 创建私聊的本地聊天记录文件 */
                 char privateChatRecord[PATH_SIZE] = {0};
                 JoinPath(privateChatRecord, path, name);
+                // /* 清空缓存区 */
+                int c;
+                while ((c = getchar()) != '\n' && c != EOF);
                 ChatRoomPrivateChat(sockfd, name, friends,username,privateChatRecord);
                 memset(name, 0, NAME_SIZE);
                 break;
@@ -498,7 +501,7 @@ int ChatRoomPrivateChat(int sockfd, const char *name, json_object *friends, cons
     strcpy(tempPath,path);
     recvArgs.path = tempPath;
     pthread_create(&tid, NULL, updateChatRecord, (void *)&recvArgs);
-    while( strcmp(message, "") != 0)
+    while(1)
     {
         printf("path:%s\n",path);
         // /* 加锁 */
@@ -527,9 +530,7 @@ int ChatRoomPrivateChat(int sockfd, const char *name, json_object *friends, cons
             
 
         
-        /* 清空缓存区 */
-        int c;
-        while ((c = getchar()) != '\n' && c != EOF);
+        
         /* 使用 fgets 读取整行输入 */
         if (fgets(message, sizeof(message), stdin) == NULL) 
         {
@@ -543,6 +544,11 @@ int ChatRoomPrivateChat(int sockfd, const char *name, json_object *friends, cons
         {
             message[len - 1] = '\0';
         }
+        
+        if( strcmp(message, "") == 0)
+        {
+            break;
+        }
 
         // /* 如果输入是空行，表示用户按下回车，退出私聊 */
         // if (strcmp(message, "") == 0) 
@@ -551,11 +557,17 @@ int ChatRoomPrivateChat(int sockfd, const char *name, json_object *friends, cons
         // }
         
         /* 获取时间 */
+        /* 定义一个 time_t 类型的变量 now，用于存储当前的时间戳 */
         time_t now;
+        /* 定义一个指向 struct tm 结构体的指针 tm，用于存储经过转换后的时间信息 */
         struct tm *tm;
+        /* 用于存储格式化后的时间字符串。初始化为全零 */
         static char time_str[20] = {0};
+        /* 调用 time() 函数获取当前的时间戳，并将其存储在 now 变量中 */
         time(&now);
+        /* 调用 localtime() 函数将时间戳 now 转换为本地时间 */
         tm = localtime(&now);
+        /* 调用 strftime() 函数将 tm 结构体中的时间信息按照指定的格式转换为字符串，并存储在 time_str 中。具体格式为 "%Y-%m-%d %H:%M:%S"，表示年-月-日 时:分:秒的形式 */
         strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", tm);
         /* 加锁 */
         pthread_mutex_lock(&mutex);
@@ -862,8 +874,8 @@ static void* ChatRoomRecvMsg(void* args)
                 char privateChatRecordPath[PATH_SIZE] = {0};
                 JoinPath(privateChatRecordPath, path, groupName);
                 /* 未读消息数+1 */
-                const int unread = json_object_get_int(json_object_object_get(friends, groupName));
-                json_object_object_add(friends, groupName, json_object_new_int(unread + 1));
+                const int unread = json_object_get_int(json_object_object_get(groups, groupName));
+                json_object_object_add(groups, groupName, json_object_new_int(unread + 1));
                 /* 加锁 */
                 pthread_mutex_lock(&mutex);
                 /* 打开群聊的本地聊天记录文件 */
@@ -1002,6 +1014,9 @@ int ChatRoomShowGroupChat(int sockfd, json_object *groups, const char *username,
                 /* 群聊 */
                 printf("请输入要群聊的群组:");
                 scanf("%s", name);
+                // /* 清空缓存区 */
+                int c;
+                while ((c = getchar()) != '\n' && c != EOF);
                 ChatRoomGroupChat(sockfd, name, groups, username, path);
                 memset(name, 0, NAME_SIZE);
                 break;
@@ -1034,7 +1049,7 @@ int ChatRoomGroupChat(int sockfd, const char *name, json_object *groups, const c
     char groupChatRecordPath[PATH_SIZE] = {0};
     JoinPath(groupChatRecordPath, path, name);
     
-    char message[CONTENT_SIZE] = "\n";
+    char message[CONTENT_SIZE] = {0};
     /* 读取聊天记录函数 */
     /* 开启接收 */
     pthread_t tid;
@@ -1044,7 +1059,7 @@ int ChatRoomGroupChat(int sockfd, const char *name, json_object *groups, const c
     strcpy(tempPath,groupChatRecordPath);
     recvArgs.path = tempPath;
     pthread_create(&tid, NULL, updateChatRecord, (void *)&recvArgs);
-    while( strcmp(message, "") != 0)
+    while(1)
     {
         printf("path:%s\n",groupChatRecordPath);
         // /* 加锁 */
@@ -1062,15 +1077,16 @@ int ChatRoomGroupChat(int sockfd, const char *name, json_object *groups, const c
             
 
         
-        /* 清空缓存区 */
-        int c;
-        while ((c = getchar()) != '\n' && c != EOF);
-        /* 使用 fgets 读取整行输入 */
+        // /* 清空缓存区 */
+        // int c;
+        // while ((c = getchar()) != '\n' && c != EOF);
+        // /* 使用 fgets 读取整行输入 */
         if (fgets(message, sizeof(message), stdin) == NULL) 
         {
             perror("fgets error");
             exit(EXIT_FAILURE);
         }
+
 
         /* 去掉输入字符串末尾的换行符 */
         size_t len = strlen(message);
@@ -1078,7 +1094,10 @@ int ChatRoomGroupChat(int sockfd, const char *name, json_object *groups, const c
         {
             message[len - 1] = '\0';
         }
-
+        if( strcmp(message, "") == 0)
+        {
+            break;
+        }
         // /* 如果输入是空行，表示用户按下回车，退出私聊 */
         // if (strcmp(message, "") == 0) 
         // {
